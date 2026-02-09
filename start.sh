@@ -131,12 +131,29 @@ stop_service() {
     
     log_info "正在停止服务 (PID: $PID)..."
     
-    # 发送 SIGTERM 信号（优雅关闭）
+    # 查找所有相关进程（包括 worker 进程）
+    # uvicorn 使用多个 workers 时会创建子进程
+    PIDS=$(pgrep -P "$PID" 2>/dev/null || true)
+    ALL_PIDS="$PID"
+    if [ -n "$PIDS" ]; then
+        ALL_PIDS="$PID $PIDS"
+        log_info "发现子进程: $PIDS"
+    fi
+    
+    # 发送 SIGTERM 信号给主进程（uvicorn 会优雅关闭所有 worker）
     kill -TERM "$PID" 2>/dev/null || true
     
-    # 等待进程退出（最多等待 30 秒）
+    # 等待所有进程退出（最多等待 30 秒）
     for i in {1..30}; do
-        if ! ps -p "$PID" > /dev/null 2>&1; then
+        ALL_RUNNING=false
+        for p in $ALL_PIDS; do
+            if ps -p "$p" > /dev/null 2>&1; then
+                ALL_RUNNING=true
+                break
+            fi
+        done
+        
+        if [ "$ALL_RUNNING" = false ]; then
             log_info "服务已优雅关闭"
             rm -f "$PID_FILE"
             return 0
@@ -144,17 +161,30 @@ stop_service() {
         sleep 1
     done
     
-    # 如果 30 秒后仍未退出，强制杀死
-    log_warn "优雅关闭超时，强制终止进程..."
-    kill -KILL "$PID" 2>/dev/null || true
+    # 如果 30 秒后仍未退出，强制杀死所有进程
+    log_warn "优雅关闭超时，强制终止所有进程..."
+    for p in $ALL_PIDS; do
+        if ps -p "$p" > /dev/null 2>&1; then
+            kill -KILL "$p" 2>/dev/null || true
+        fi
+    done
     sleep 1
     
-    if ! ps -p "$PID" > /dev/null 2>&1; then
+    # 检查是否还有进程在运行
+    STILL_RUNNING=false
+    for p in $ALL_PIDS; do
+        if ps -p "$p" > /dev/null 2>&1; then
+            STILL_RUNNING=true
+            break
+        fi
+    done
+    
+    if [ "$STILL_RUNNING" = false ]; then
         log_info "服务已强制关闭"
         rm -f "$PID_FILE"
         return 0
     else
-        log_error "无法关闭服务"
+        log_error "无法关闭服务，可能还有进程在运行"
         return 1
     fi
 }
