@@ -89,3 +89,23 @@ def replace_times_in_description(description: str) -> str:
         return updated_description
     except Exception as e:
         return description  # 如果替换失败，返回原值
+
+
+def url_to_link(text: str) -> str:
+    """
+    将文本中的 URL 转换为 HTML 链接标签
+    用于 Telegram HTML 格式
+    """
+    if not text or not isinstance(text, str):
+        return text
+    
+    # 匹配 http:// 或 https:// 开头的 URL
+    url_pattern = r'(https?://[^\s\)]+)'
+    
+    def replace_url(match):
+        url = match.group(1)
+        # 移除 URL 末尾可能存在的标点符号（除了在 HTML 标签中）
+        url_clean = url.rstrip('.,;:!?)')
+        return f'<a href="{url_clean}">{url_clean}</a>'
+    
+    return re.sub(url_pattern, replace_url, text)
