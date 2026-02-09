@@ -15,9 +15,14 @@ def detect(payload: Dict[str, Any]) -> bool:
     检测是否为 Prometheus Alertmanager 格式
     
     识别特征：
-    - 包含 "version" 字段（如 "4"）
-    - 包含 "groupKey" 字段
+    - 包含 "version" 字段且为 "4"（Grafana 用 "1"）
+    - 或 包含 "alerts" + "groupKey" 且无 Grafana 特有 orgId
     """
+    # Grafana 已优先在 normalizer 中识别（orgId / version "1"），此处仅识别 Alertmanager
+    if "orgId" in payload:
+        return False
+    if payload.get("version") == "1":
+        return False
     return "version" in payload or ("alerts" in payload and "groupKey" in payload)
 
 
