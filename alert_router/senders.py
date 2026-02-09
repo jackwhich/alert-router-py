@@ -3,9 +3,12 @@
 """
 import json
 from typing import Optional
+
 import requests
-from .models import Channel
+
 from logging_config import get_logger
+
+from .models import Channel
 
 logger = get_logger("alert-router")
 
@@ -48,8 +51,12 @@ def send_telegram(ch: Channel, text: str, parse_mode: Optional[str] = None):
         kwargs["proxies"] = ch.proxy
     
     try:
+        logger.info(f"发送 Telegram 消息到渠道 [{ch.name}]，URL: {url}")
+        logger.debug(f"发送 Telegram 消息的完整 payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
         response = requests.post(url, **kwargs)
         response.raise_for_status()
+        logger.info(f"Telegram 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
+        logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
         return response
     except requests.exceptions.RequestException as e:
         logger.error(f"发送 Telegram 消息失败 (渠道: {ch.name}): {e}")
@@ -74,12 +81,31 @@ def send_webhook(ch: Channel, body: str):
     
     try:
         # 尝试作为 JSON 发送
-        return requests.post(ch.webhook_url, json=json.loads(body), **kwargs)
+        logger.info(f"发送 Webhook 消息到渠道 [{ch.name}]，URL: {ch.webhook_url}")
+        logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
+        json_body = json.loads(body)
+        response = requests.post(ch.webhook_url, json=json_body, **kwargs)
+        response.raise_for_status()
+        logger.info(f"Webhook 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
+        try:
+            logger.debug(f"Webhook 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+        except (json.JSONDecodeError, ValueError):
+            logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
+        return response
     except (json.JSONDecodeError, ValueError):
         # 如果不是有效的 JSON，则作为原始数据发送
         logger.debug(f"Webhook body 非 JSON，以原始数据发送 (渠道: {ch.name})")
+        logger.info(f"发送 Webhook 消息到渠道 [{ch.name}]，URL: {ch.webhook_url}")
+        logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
         try:
-            return requests.post(ch.webhook_url, data=body, **kwargs)
+            response = requests.post(ch.webhook_url, data=body, **kwargs)
+            response.raise_for_status()
+            logger.info(f"Webhook 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
+            try:
+                logger.debug(f"Webhook 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+            except (json.JSONDecodeError, ValueError):
+                logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
+            return response
         except requests.exceptions.RequestException as e:
             logger.error(f"发送 Webhook 消息失败 (渠道: {ch.name}): {e}")
             raise

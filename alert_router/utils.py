@@ -27,7 +27,7 @@ def convert_to_cst(time_str: str) -> str:
         # Grafana/Prometheus ISO 8601 格式（带时区，如 +08:00 或 Z）
         # 微秒超过 6 位需截断，否则 fromisoformat 可能失败
         m = re.match(
-            r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?([+-]\d{2}:\d{2}|Z)?',
+            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?([+-]\d{2}:\d{2}|Z)?",
             time_str.strip()
         )
         if m:
@@ -54,8 +54,8 @@ def convert_to_cst(time_str: str) -> str:
 
         # 尝试解析 %Y-%m-%dT%H:%M:%S.%fZ 格式（例如：2025-03-28T00:30:15.418Z）
         try:
-            clean_time = time_str.rstrip('Z')
-            dt = datetime.strptime(clean_time, '%Y-%m-%dT%H:%M:%S.%f')
+            clean_time = time_str.rstrip("Z")
+            dt = datetime.strptime(clean_time, "%Y-%m-%dT%H:%M:%S.%f")
             # 直接加 8 小时
             cst_dt = dt + timedelta(hours=8)
             result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -66,8 +66,8 @@ def convert_to_cst(time_str: str) -> str:
         
         # 尝试解析 %Y-%m-%dT%H:%M:%SZ 格式（不带毫秒）
         try:
-            clean_time = time_str.rstrip('Z')
-            dt = datetime.strptime(clean_time, '%Y-%m-%dT%H:%M:%S')
+            clean_time = time_str.rstrip("Z")
+            dt = datetime.strptime(clean_time, "%Y-%m-%dT%H:%M:%S")
             # 直接加 8 小时
             cst_dt = dt + timedelta(hours=8)
             result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -78,7 +78,7 @@ def convert_to_cst(time_str: str) -> str:
         
         # 尝试解析 %Y-%m-%d %H:%M:%S.%f +0000 UTC 格式（例如：2025-03-28 00:30:15.418 +0000 UTC）
         try:
-            dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S.%f +0000 UTC')
+            dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S.%f +0000 UTC")
             # 直接加 8 小时
             cst_dt = dt + timedelta(hours=8)
             result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -129,12 +129,12 @@ def url_to_link(text: str) -> str:
         return text
     
     # 匹配 http:// 或 https:// 开头的 URL
-    url_pattern = r'(https?://[^\s\)]+)'
+    url_pattern = r"(https?://[^\s\)]+)"
     
     def replace_url(match):
         url = match.group(1)
         # 移除 URL 末尾可能存在的标点符号（除了在 HTML 标签中）
-        url_clean = url.rstrip('.,;:!?)')
-        return f'<a href="{url_clean}">{url_clean}</a>'
+        url_clean = url.rstrip(".,;:!?)")
+        return f"<a href=\"{url_clean}\">{url_clean}</a>"
     
     return re.sub(url_pattern, replace_url, text)

@@ -2,9 +2,11 @@
 配置加载模块（只负责读配置，不初始化日志；日志由 app 在启动时显式初始化）
 """
 import os
-import yaml
 from pathlib import Path
 from typing import Dict, Tuple
+
+import yaml
+
 from .models import Channel
 
 

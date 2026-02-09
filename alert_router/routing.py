@@ -3,6 +3,7 @@
 """
 import re
 from typing import Dict, List
+
 from logging_config import get_logger
 
 logger = get_logger("alert-router")
@@ -13,10 +14,10 @@ def match(labels: Dict[str, str], cond: Dict[str, str]) -> bool:
     匹配路由条件，支持正则表达式
     
     支持的正则格式：
-    1. 完整正则表达式：以 '.*' 开头和结尾，如 '.*pattern.*'
-    2. 开头匹配：以 '.*' 开头，如 '.*pattern'
-    3. 结尾匹配：以 '.*' 结尾，如 'pattern.*'
-    4. Alertmanager 风格：直接使用正则，如 'Jenkins.*|jenkins.*'（自动识别）
+    1. 完整正则表达式：以 ".*" 开头和结尾，如 ".*pattern.*"
+    2. 开头匹配：以 ".*" 开头，如 ".*pattern"
+    3. 结尾匹配：以 ".*" 结尾，如 "pattern.*"
+    4. Alertmanager 风格：直接使用正则，如 "Jenkins.*|jenkins.*"（自动识别）
     5. 精确匹配：普通字符串
     
     Args:
@@ -34,12 +35,18 @@ def match(labels: Dict[str, str], cond: Dict[str, str]) -> bool:
         label_str = str(label_value)
         
         # 检查是否包含正则表达式特征字符
-        if any(char in v for char in ['*', '^', '$', '|', '(', ')', '[', ']', '+', '?', '{', '}']):
+        regex_chars = ["*", "^", "$", "|", "(", ")", "[", "]", "+", "?", "{", "}"]
+        has_regex_chars = any(char in v for char in regex_chars)
+        
+        # 检查是否为简化的正则表达式格式（.*pattern.*, .*pattern, pattern.*）
+        is_simple_regex = v.startswith(".*") or v.endswith(".*")
+        
+        # 如果包含正则表达式特征字符或者是简化的正则格式，尝试正则匹配
+        if has_regex_chars or is_simple_regex:
             try:
-                # 尝试作为正则表达式匹配
-                # 如果包含 ^ 或 $，则使用 match 或 fullmatch
+                # 构建正则表达式模式
                 if v.startswith("^") or v.endswith("$"):
-                    # 锚定匹配
+                    # 锚定匹配（已包含锚定符）
                     pattern = v
                 elif v.startswith(".*") and v.endswith(".*"):
                     # 去掉首尾的 .*，使用 search
@@ -61,21 +68,6 @@ def match(labels: Dict[str, str], cond: Dict[str, str]) -> bool:
                 logger.warning(f"正则表达式错误: {v}，使用精确匹配")
                 if labels.get(k) != v:
                     return False
-        elif v.startswith(".*") and v.endswith(".*"):
-            # 正则表达式匹配：.*pattern.*
-            pattern = v[2:-2]  # 去掉首尾的 .*
-            if not re.search(pattern, label_str):
-                return False
-        elif v.startswith(".*"):
-            # 正则表达式匹配：.*pattern（匹配结尾）
-            pattern = v[2:]  # 去掉开头的 .*
-            if not re.search(pattern + "$", label_str):
-                return False
-        elif v.endswith(".*"):
-            # 正则表达式匹配：pattern.*（匹配开头）
-            pattern = v[:-2]  # 去掉结尾的 .*
-            if not re.search("^" + pattern, label_str):
-                return False
         else:
             # 精确匹配
             if labels.get(k) != v:
