@@ -1,0 +1,39 @@
+🔴 <b>Jenkins 构建失败（PGP签名校验失败）</b>
+<b>━━━━━━━━━━━━━━</b>
+
+{% set job_name = labels.jenkins_job | default('未知任务') %}
+{% set parts = job_name.strip('/').split('/') %}
+{% set prefix = parts[0] %}
+{% set task = parts[1] if parts|length > 1 else parts[0] %}
+{% if prefix == 'uat' %}
+  {% set env = 'EB预发' %}
+{% elif prefix == 'pro' %}
+  {% set env = 'EB生产' %}
+{% elif prefix == 'jp-prod-gray-ebpay' %}
+  {% set env = 'EB生产灰度' %}
+{% else %}
+  {% set env = prefix %}
+{% endif %}
+
+{% set build_status_raw = labels.alert_status | default(labels.status | default(labels.result | default('UNKNOWN'))) %}
+{% set build_status = build_status_raw.upper() %}
+{% if 'SUCCESS' in build_status %}
+  {% set build_status = 'SUCCESS' %}
+{% elif 'FAIL' in build_status %}
+  {% set build_status = 'FAILURE' %}
+{% elif 'ABORT' in build_status or 'CANCEL' in build_status %}
+  {% set build_status = 'ABORTED' %}
+{% endif %}
+
+<b>环境:</b> <code>{{ env }}</code>
+<b>任务:</b> <code>{{ task }}</code>
+<b>Jenkins Job:</b> <code>{{ job_name }}</code>
+<b>状态:</b> <u>{{ build_status }}</u> <i>({{ status | default('unknown') }})</i>
+<b>分支:</b> {{ labels.gitBranch | default('N/A') }}
+<b>Commit:</b> <code>{{ labels.check_commitID | default('N/A') }}</code>
+{% if labels.build_number %}
+<b>Build:</b> <code>{{ labels.build_number }}</code>
+{% endif %}
+<b>结论:</b> <b>PGP签名校验失败</b>
+
+<b>时间:</b> {{ startsAt }}

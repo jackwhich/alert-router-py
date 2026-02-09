@@ -1,0 +1,149 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+
+# 全局代理配置（所有渠道默认使用，可被渠道级别配置覆盖）
+# 
+# 支持两种代理类型：
+# 1. HTTP/HTTPS 代理（推荐，简单直接）
+#    格式：http://proxy:port 或 http://user:pass@proxy:port
+#    优点：无需额外依赖，性能好，适合 HTTP/HTTPS 流量
+#    缺点：仅支持 HTTP/HTTPS 协议
+#
+# 2. SOCKS 代理（更通用，支持所有协议）
+#    格式：socks5://proxy:port 或 socks5://user:pass@proxy:port
+#    优点：支持所有协议（HTTP/HTTPS/TCP/UDP等），更灵活
+#    缺点：需要安装 requests[socks] 依赖
+#
+# 配置示例：
+proxy:
+  http: "http://10.8.16.64:13080"      # HTTP 代理（推荐）
+  https: "http://10.8.16.64:13080"
+# 或者使用 SOCKS 代理：
+# proxy:
+#   http: "socks5://10.8.16.64:13080"   # SOCKS5 代理
+#   https: "socks5://10.8.16.64:13080"
+# 或者使用字符串格式（会自动应用到 http 和 https）：
+# proxy: "http://10.8.16.64:13080"      # HTTP 代理
+# proxy: "socks5://10.8.16.64:13080"    # SOCKS5 代理
+
+# 全局代理开关（控制是否使用代理）
+# true: 启用代理（默认）
+# false: 禁用代理（所有渠道都不使用代理）
+proxy_enabled: true
+
+defaults:
+  title_prefix: "[ALERT]"
+  dashboard_fallback: ""
+  runbook_fallback: ""
+
+channels:
+  # Prometheus 告警群组配置
+  tg_prometheus_critical:
+    type: telegram
+    enabled: true
+    bot_token: "123456:AAxxxx"
+    chat_id: "-1001234567890"  # Prometheus 关键告警群组
+    template: "telegram.md.j2"
+    # 代理配置（可选，不配置则使用全局代理）
+    # proxy:
+    #   http: "http://user:pass@proxy:port"   # 带认证的代理
+    #   https: "http://user:pass@proxy:port"
+    # 或者使用字符串格式：
+    # proxy: "http://proxy:port"  # 不带认证
+    # proxy: "http://user:pass@proxy:port"  # 带认证
+    # 代理开关（可选，不配置则使用全局开关）
+    # proxy_enabled: true   # 启用代理
+    # proxy_enabled: false  # 禁用代理（此渠道不走代理）
+
+  tg_prometheus_warning:
+    type: telegram
+    enabled: true
+    bot_token: "123456:AAxxxx"
+    chat_id: "-1001234567891"  # Prometheus 警告告警群组
+    template: "telegram.md.j2"
+
+  slack_prometheus:
+    type: slack
+    enabled: true
+    webhook_url: "https://hooks.slack.com/services/T000/B000/XXX"
+    template: "slack.json.j2"
+
+  # Grafana 告警群组配置
+  tg_grafana_critical:
+    type: telegram
+    enabled: true
+    bot_token: "123456:AAxxxx"
+    chat_id: "-1001234567892"  # Grafana 关键告警群组
+    template: "telegram.md.j2"
+    # 示例：使用带认证的代理
+    # proxy: "http://username:password@10.8.16.64:13080"
+
+  tg_grafana_warning:
+    type: telegram
+    enabled: true
+    bot_token: "123456:AAxxxx"
+    chat_id: "-1001234567893"  # Grafana 警告告警群组
+    template: "telegram.md.j2"
+
+  slack_grafana:
+    type: slack
+    enabled: true
+    webhook_url: "https://hooks.slack.com/services/T000/B000/YYY"
+    template: "slack.json.j2"
+    # 示例：此渠道不走代理
+    # proxy_enabled: false
+
+  # Jenkins 告警群组配置（使用 Jenkins 专用模板）
+  tg_jenkins:
+    type: telegram
+    enabled: true
+    bot_token: "123456:AAxxxx"
+    chat_id: "-1001234567894"  # Jenkins 告警群组
+    template: "telegram_jenkins.html.j2"  # 使用 Jenkins 专用 HTML 模板
+
+routing:
+  # Prometheus 告警路由规则
+  # Prometheus 关键告警：发送到 Prometheus 专用群组
+  - match:
+      _source: "prometheus"
+      severity: "critical"
+    send_to: ["tg_prometheus_critical", "slack_prometheus"]
+
+  # Prometheus 警告告警
+  - match:
+      _source: "prometheus"
+      severity: "warning"
+    send_to: ["tg_prometheus_warning", "slack_prometheus"]
+
+  # Prometheus 默认告警
+  - match:
+      _source: "prometheus"
+    send_to: ["slack_prometheus"]
+
+  # Grafana 告警路由规则
+  # Grafana 关键告警：发送到 Grafana 专用群组
+  - match:
+      _source: "grafana"
+      severity: "critical"
+    send_to: ["tg_grafana_critical", "slack_grafana"]
+
+  # Grafana 警告告警
+  - match:
+      _source: "grafana"
+      severity: "warning"
+    send_to: ["tg_grafana_warning", "slack_grafana"]
+
+  # Grafana 默认告警
+  - match:
+      _source: "grafana"
+    send_to: ["slack_grafana"]
+
+  # Jenkins 告警路由规则（包含 jenkins_job label 的告警）
+  - match:
+      jenkins_job: ".*"  # 匹配所有包含 jenkins_job 的告警
+    send_to: ["tg_jenkins"]
+
+  # 兜底规则（兼容没有 _source 标识的旧告警）
+  - default: true
+    send_to: ["slack_prometheus"]
