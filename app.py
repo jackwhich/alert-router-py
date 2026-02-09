@@ -1,6 +1,6 @@
 import json
 import re
-import logging
+import os
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
@@ -9,13 +9,10 @@ import yaml
 from fastapi import FastAPI, Request
 from jinja2 import Environment, FileSystemLoader
 from alert_normalizer import normalize
+from logging_config import setup_logging, get_logger
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# 初始化默认 logger（会在 load_config 中根据配置文件重新配置）
+logger = get_logger("alert-router")
 
 @dataclass
 class Channel:
@@ -32,6 +29,20 @@ class Channel:
 def load_config():
     with open("config.yaml", "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
+    
+    # 配置日志（如果配置文件中指定了日志配置）
+    log_config = raw.get("logging", {})
+    if log_config:
+        global logger
+        logger = setup_logging(
+            log_dir=log_config.get("log_dir", "logs"),
+            log_file=log_config.get("log_file", "alert-router.log"),
+            level=log_config.get("level", "INFO"),
+            max_bytes=log_config.get("max_bytes", 10 * 1024 * 1024),
+            backup_count=log_config.get("backup_count", 5)
+        )
+        logger.info("日志系统已初始化")
+    
     channels = {}
     # 获取全局代理配置和开关
     global_proxy = raw.get("proxy", None)
@@ -60,7 +71,9 @@ def load_config():
         channels[k] = Channel(name=k, enabled=enabled, **channel_data)
     return raw, channels
 
+# 加载配置（会初始化日志系统）
 CONFIG, CHANNELS = load_config()
+logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
 
 env = Environment(loader=FileSystemLoader("templates"))
 
@@ -259,6 +272,20 @@ def send_webhook(ch: Channel, body: str):
         raise
 
 app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时的初始化"""
+    logger.info("=" * 60)
+    logger.info("Alert Router 服务启动")
+    logger.info(f"监听地址: {CONFIG.get('server', {}).get('host', '0.0.0.0')}:{CONFIG.get('server', {}).get('port', 8080)}")
+    logger.info(f"已启用渠道数: {sum(1 for ch in CHANNELS.values() if ch.enabled)}/{len(CHANNELS)}")
+    logger.info("=" * 60)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """应用关闭时的清理"""
+    logger.info("Alert Router 服务正在关闭...")
 
 @app.post("/webhook")
 async def webhook(req: Request):

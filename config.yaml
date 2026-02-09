@@ -2,6 +2,19 @@ server:
   host: 0.0.0.0
   port: 8080
 
+# 日志配置
+logging:
+  # 日志目录（相对于项目根目录）
+  log_dir: "logs"
+  # 日志文件名
+  log_file: "alert-router.log"
+  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  # 单个日志文件最大大小（字节，默认 10MB）
+  max_bytes: 10485760
+  # 保留的备份文件数量
+  backup_count: 5
+
 # 全局代理配置（所有渠道默认使用，可被渠道级别配置覆盖）
 # 
 # 支持两种代理类型：

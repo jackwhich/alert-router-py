@@ -47,9 +47,12 @@ alert-router-py/
 ├── alert_normalizer.py    # 统一解析入口（告警标准化）
 ├── prometheus_adapter.py  # Prometheus Alertmanager 适配器
 ├── grafana_adapter.py      # Grafana Unified Alerting 适配器
+├── logging_config.py       # 日志配置模块
 ├── config.yaml            # 配置文件
 ├── requirements.txt       # Python 依赖
 ├── README.md             # 说明文档
+├── logs/                  # 日志目录（自动创建）
+│   └── alert-router.log  # 日志文件
 └── templates/            # 模板目录
     ├── telegram.md.j2    # Telegram 模板
     └── slack.json.j2     # Slack 模板
@@ -64,10 +67,33 @@ alert-router-py/
 - ✅ 按告警级别（severity）路由
 - ✅ 模板化消息格式（Jinja2）
 - ✅ 模块化设计，易于扩展
+- ✅ 完善的日志系统（文件输出 + 日志轮转）
+
+## 日志配置
+
+日志系统支持文件输出和日志轮转，配置在 `config.yaml` 中：
+
+```yaml
+logging:
+  log_dir: "logs"              # 日志目录
+  log_file: "alert-router.log" # 日志文件名
+  level: "INFO"                # 日志级别
+  max_bytes: 10485760          # 单个文件最大 10MB
+  backup_count: 5              # 保留 5 个备份文件
+```
+
+日志文件会自动轮转，当日志文件达到 `max_bytes` 大小时，会自动创建新文件，并保留指定数量的备份文件。
+
+日志格式示例：
+```
+2024-01-15 10:30:00 - alert-router - INFO - [app.py:273] - 收到告警请求: {...}
+2024-01-15 10:30:01 - alert-router - INFO - [app.py:320] - 告警 HighCPU 已发送到渠道: tg_critical
+2024-01-15 10:30:02 - alert-router - ERROR - [app.py:324] - 告警 HighCPU 发送到渠道 slack_main 失败: Connection timeout
+```
 
 ## 配置说明
 
-详细配置说明请参考 `alert-router.md` 文档。
+详细配置说明请参考 `template-examples.md` 文档。
 
 ## 许可证
 
