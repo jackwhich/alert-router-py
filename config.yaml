@@ -48,7 +48,7 @@ channels:
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567890"  # 默认告警群组
-    template: "telegram.md.j2"
+    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
 
   # Prometheus 告警群组配置
   tg_prometheus_critical:
@@ -56,7 +56,7 @@ channels:
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567890"  # Prometheus 关键告警群组
-    template: "telegram.md.j2"
+    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
     # 代理配置（可选，不配置则使用全局代理）
     # proxy:
     #   http: "socks5://user:pass@proxy:port"   # 带认证的 SOCKS5 代理
@@ -73,7 +73,7 @@ channels:
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567891"  # Prometheus 警告告警群组
-    template: "telegram.md.j2"
+    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
 
   slack_prometheus:
     type: slack
@@ -87,7 +87,7 @@ channels:
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567892"  # Grafana 关键告警群组
-    template: "telegram.md.j2"
+    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
     # 示例：使用带认证的 SOCKS5 代理
     # proxy: "socks5://username:password@10.8.16.64:13080"
 
@@ -96,7 +96,7 @@ channels:
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567893"  # Grafana 警告告警群组
-    template: "telegram.md.j2"
+    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
 
   slack_grafana:
     type: slack
