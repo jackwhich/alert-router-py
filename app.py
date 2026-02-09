@@ -4,12 +4,12 @@ FastAPI 应用主入口
 import json
 import asyncio
 from fastapi import FastAPI, Request
-from alert_normalizer import normalize
+from adapters.alert_normalizer import normalize
 from logging_config import get_logger
-from config import load_config
-from routing import route
-from template_renderer import render
-from senders import send_telegram, send_webhook
+from alert_router.config import load_config
+from alert_router.routing import route
+from alert_router.template_renderer import render
+from alert_router.senders import send_telegram, send_webhook
 
 # 加载配置（会初始化日志系统）
 CONFIG, CHANNELS = load_config()

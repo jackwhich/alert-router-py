@@ -4,7 +4,7 @@
 import json
 from typing import Optional
 import requests
-from models import Channel
+from .models import Channel
 from logging_config import get_logger
 
 logger = get_logger("alert-router")

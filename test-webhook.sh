@@ -37,7 +37,7 @@ curl -X POST http://10.8.64.101:9600/webhook \
       "annotations": {
         "summary": "域名证书30天后过期 (instance https://pro-app-ebpay-s3.ebpay01.net)"
       },
-      "startsAt": "2026-02-08T14:06:07Z",
+      "startsAt": "2026-02-08T06:06:07Z",
       "endsAt": "0001-01-01T00:00:00Z",
       "generatorURL": "http://prometheus:9090/graph?g0.expr=up%7Bjob%3D%22prometheus%22%7D"
     }

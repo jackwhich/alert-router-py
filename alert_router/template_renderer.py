@@ -3,7 +3,7 @@
 """
 from typing import Dict, Any
 from jinja2 import Environment, FileSystemLoader
-from utils import convert_to_cst, replace_times_in_description
+from .utils import convert_to_cst, replace_times_in_description
 
 env = Environment(
     loader=FileSystemLoader("templates"),
