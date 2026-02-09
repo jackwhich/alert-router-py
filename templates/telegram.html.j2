@@ -1,20 +1,19 @@
-{% if status == "firing" %}❌❌❌❌ <b>状态: </b>告警{% else %}✅✅✅✅ <b>状态: </b>恢复{% endif %}
+{% if status == "firing" -%}
+🚨🚨🚨🚨 状态: 告警
+{%- else -%}
+✅✅✅✅ 状态: 恢复
+{%- endif %}
 
-<b>时间: </b>{{ startsAt | convert_to_cst }}
-{% for key, value in labels.items() %}
-{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source'] %}
-{% if value is string and (value.startswith('http://') or value.startswith('https://')) %}
-<b>{{ key }}: </b><a href="{{ value }}">{{ value }}</a>
-{% else %}
-<b>{{ key }}: </b>{{ value }}
-{% endif %}
-{% endif %}
+时间: {{ startsAt }}
+{% for key, value in labels.items() -%}
+{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source'] -%}
+{{ key }}: {{ value }}
+{% endif -%}
 {% endfor %}
-{% if annotations.summary %}
 
-<b>summary: </b>{{ annotations.summary | url_to_link }}
-{% endif %}
-{% if annotations.description %}
-<b>description: </b>{{ annotations.description | url_to_link }}
-{% endif %}
-
+{% if annotations.summary -%}
+summary: {{ annotations.summary }}
+{%- endif %}
+{% if annotations.description -%}
+description: {{ annotations.description }}
+{%- endif %}
