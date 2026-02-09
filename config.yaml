@@ -62,13 +62,6 @@ channels:
     chat_id: "-1001234567890"
     template: "prometheus_telegram.html.j2"
 
-  prometheus_telegram_warning:
-    type: telegram
-    enabled: true
-    bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567891"
-    template: "prometheus_telegram.html.j2"
-
   prometheus_slack:
     type: slack
     enabled: true
@@ -88,13 +81,6 @@ channels:
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567892"
-    template: "grafana_telegram.html.j2"
-
-  grafana_telegram_warning:
-    type: telegram
-    enabled: true
-    bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567893"
     template: "grafana_telegram.html.j2"
 
   grafana_slack:
