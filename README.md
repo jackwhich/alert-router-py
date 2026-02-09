@@ -27,8 +27,54 @@ channels:
 
 ### 3. 启动服务
 
+#### 方式一：使用启动脚本（推荐）
+
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 8080
+# 启动服务
+./start.sh start
+
+# 停止服务（优雅关闭）
+./start.sh stop
+
+# 重启服务
+./start.sh restart
+
+# 查看状态
+./start.sh status
+
+# 查看日志
+./start.sh logs
+```
+
+#### 方式二：使用 systemd（生产环境推荐）
+
+```bash
+# 1. 复制服务文件
+sudo cp alert-router.service /etc/systemd/system/
+
+# 2. 修改服务文件中的路径和用户
+sudo vi /etc/systemd/system/alert-router.service
+
+# 3. 重载 systemd 配置
+sudo systemctl daemon-reload
+
+# 4. 启动服务
+sudo systemctl start alert-router
+
+# 5. 设置开机自启
+sudo systemctl enable alert-router
+
+# 6. 查看状态
+sudo systemctl status alert-router
+
+# 7. 查看日志
+sudo journalctl -u alert-router -f
+```
+
+#### 方式三：直接使用 uvicorn
+
+```bash
+uvicorn app:app --host 0.0.0.0 --port 8080 --workers 4
 ```
 
 ### 4. 配置 Webhook
@@ -50,6 +96,8 @@ alert-router-py/
 ├── logging_config.py       # 日志配置模块
 ├── config.yaml            # 配置文件
 ├── requirements.txt       # Python 依赖
+├── start.sh               # 启动脚本（支持优雅重启）
+├── alert-router.service   # systemd 服务文件
 ├── README.md             # 说明文档
 ├── logs/                  # 日志目录（自动创建）
 │   └── alert-router.log  # 日志文件
@@ -68,6 +116,40 @@ alert-router-py/
 - ✅ 模板化消息格式（Jinja2）
 - ✅ 模块化设计，易于扩展
 - ✅ 完善的日志系统（文件输出 + 日志轮转）
+- ✅ 优雅关闭和重启支持
+
+## 启动脚本说明
+
+启动脚本 `start.sh` 支持以下命令：
+
+- `start` - 启动服务
+- `stop` - 停止服务（优雅关闭，等待最多 30 秒）
+- `restart` - 重启服务
+- `status` - 查看服务状态和进程信息
+- `logs` - 实时查看日志
+- `reload` - 重载配置（重启服务）
+
+### 环境变量
+
+可以通过环境变量自定义配置：
+
+```bash
+export HOST=0.0.0.0      # 监听地址
+export PORT=8080         # 监听端口
+export WORKERS=4         # 工作进程数
+export TIMEOUT=30        # 超时时间（秒）
+
+./start.sh start
+```
+
+### 优雅关闭
+
+启动脚本支持优雅关闭：
+
+1. 发送 `SIGTERM` 信号给主进程
+2. uvicorn 会等待当前请求完成
+3. 最多等待 30 秒
+4. 如果超时，强制终止进程
 
 ## 日志配置
 

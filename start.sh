@@ -1,27 +1,267 @@
 #!/bin/bash
 
-# 告警路由服务启动脚本
+# 告警路由服务管理脚本
+# 支持启动、停止、重启、状态查看、优雅关闭
 
-echo "正在启动告警路由服务..."
+set -e
+
+# 配置变量
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_NAME="alert-router"
+PID_FILE="${SCRIPT_DIR}/${PROJECT_NAME}.pid"
+LOG_FILE="${SCRIPT_DIR}/logs/${PROJECT_NAME}.log"
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-8080}"
+WORKERS="${WORKERS:-4}"
+TIMEOUT="${TIMEOUT:-30}"
+
+# 颜色输出
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# 日志函数
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
 
 # 检查 Python 环境
-if ! command -v python3 &> /dev/null; then
-    echo "错误: 未找到 python3，请先安装 Python 3"
-    exit 1
-fi
+check_python() {
+    if ! command -v python3 &> /dev/null; then
+        log_error "未找到 python3，请先安装 Python 3"
+        exit 1
+    fi
+}
 
-# 检查依赖是否安装
-if ! python3 -c "import fastapi" 2>/dev/null; then
-    echo "正在安装依赖..."
-    pip3 install -r requirements.txt
-fi
+# 检查依赖
+check_dependencies() {
+    if ! python3 -c "import fastapi" 2>/dev/null; then
+        log_warn "正在安装依赖..."
+        pip3 install -r requirements.txt
+    fi
+}
 
-# 检查配置文件是否存在
-if [ ! -f "config.yaml" ]; then
-    echo "错误: 未找到 config.yaml 配置文件"
-    exit 1
-fi
+# 检查配置文件
+check_config() {
+    if [ ! -f "${SCRIPT_DIR}/config.yaml" ]; then
+        log_error "未找到 config.yaml 配置文件"
+        exit 1
+    fi
+}
+
+# 获取进程 PID
+get_pid() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            echo "$PID"
+            return 0
+        else
+            # PID 文件存在但进程不存在，清理 PID 文件
+            rm -f "$PID_FILE"
+            return 1
+        fi
+    fi
+    return 1
+}
 
 # 启动服务
-echo "启动服务在 http://0.0.0.0:8080"
-uvicorn app:app --host 0.0.0.0 --port 8080
+start_service() {
+    check_python
+    check_dependencies
+    check_config
+    
+    if get_pid > /dev/null; then
+        log_warn "服务已在运行中 (PID: $(get_pid))"
+        return 1
+    fi
+    
+    log_info "正在启动 ${PROJECT_NAME} 服务..."
+    log_info "监听地址: http://${HOST}:${PORT}"
+    log_info "工作进程数: ${WORKERS}"
+    log_info "日志文件: ${LOG_FILE}"
+    
+    # 创建日志目录
+    mkdir -p "$(dirname "$LOG_FILE")"
+    
+    # 启动服务（后台运行）
+    cd "$SCRIPT_DIR"
+    nohup uvicorn app:app \
+        --host "$HOST" \
+        --port "$PORT" \
+        --workers "$WORKERS" \
+        --timeout-keep-alive "$TIMEOUT" \
+        --log-level info \
+        --access-log \
+        --no-use-colors \
+        >> "$LOG_FILE" 2>&1 &
+    
+    PID=$!
+    echo $PID > "$PID_FILE"
+    
+    # 等待服务启动
+    sleep 2
+    
+    if ps -p "$PID" > /dev/null 2>&1; then
+        log_info "服务启动成功 (PID: $PID)"
+        log_info "查看日志: tail -f ${LOG_FILE}"
+        return 0
+    else
+        log_error "服务启动失败，请查看日志: ${LOG_FILE}"
+        rm -f "$PID_FILE"
+        return 1
+    fi
+}
+
+# 停止服务（优雅关闭）
+stop_service() {
+    if ! PID=$(get_pid); then
+        log_warn "服务未运行"
+        return 1
+    fi
+    
+    log_info "正在停止服务 (PID: $PID)..."
+    
+    # 发送 SIGTERM 信号（优雅关闭）
+    kill -TERM "$PID" 2>/dev/null || true
+    
+    # 等待进程退出（最多等待 30 秒）
+    for i in {1..30}; do
+        if ! ps -p "$PID" > /dev/null 2>&1; then
+            log_info "服务已优雅关闭"
+            rm -f "$PID_FILE"
+            return 0
+        fi
+        sleep 1
+    done
+    
+    # 如果 30 秒后仍未退出，强制杀死
+    log_warn "优雅关闭超时，强制终止进程..."
+    kill -KILL "$PID" 2>/dev/null || true
+    sleep 1
+    
+    if ! ps -p "$PID" > /dev/null 2>&1; then
+        log_info "服务已强制关闭"
+        rm -f "$PID_FILE"
+        return 0
+    else
+        log_error "无法关闭服务"
+        return 1
+    fi
+}
+
+# 重启服务
+restart_service() {
+    log_info "正在重启服务..."
+    stop_service || true
+    sleep 2
+    start_service
+}
+
+# 查看服务状态
+status_service() {
+    if PID=$(get_pid); then
+        log_info "服务运行中 (PID: $PID)"
+        
+        # 显示进程信息
+        if command -v ps > /dev/null; then
+            echo ""
+            ps -p "$PID" -o pid,ppid,user,%cpu,%mem,etime,cmd | head -2
+        fi
+        
+        # 显示端口监听情况
+        if command -v netstat > /dev/null; then
+            echo ""
+            echo "端口监听情况:"
+            netstat -tlnp 2>/dev/null | grep ":$PORT " || echo "未找到端口 $PORT 的监听"
+        elif command -v ss > /dev/null; then
+            echo ""
+            echo "端口监听情况:"
+            ss -tlnp 2>/dev/null | grep ":$PORT " || echo "未找到端口 $PORT 的监听"
+        fi
+        
+        return 0
+    else
+        log_warn "服务未运行"
+        return 1
+    fi
+}
+
+# 查看日志
+view_logs() {
+    if [ -f "$LOG_FILE" ]; then
+        tail -f "$LOG_FILE"
+    else
+        log_error "日志文件不存在: ${LOG_FILE}"
+        return 1
+    fi
+}
+
+# 重载配置（优雅重启）
+reload_service() {
+    if ! PID=$(get_pid); then
+        log_error "服务未运行，无法重载"
+        return 1
+    fi
+    
+    log_info "正在重载配置 (PID: $PID)..."
+    
+    # 发送 HUP 信号给主进程（uvicorn 支持热重载）
+    # 注意：这需要 uvicorn 的 --reload 选项，但生产环境不建议使用
+    # 更好的方式是重启服务
+    log_warn "配置重载需要重启服务，正在执行重启..."
+    restart_service
+}
+
+# 主函数
+main() {
+    case "${1:-}" in
+        start)
+            start_service
+            ;;
+        stop)
+            stop_service
+            ;;
+        restart)
+            restart_service
+            ;;
+        status)
+            status_service
+            ;;
+        logs)
+            view_logs
+            ;;
+        reload)
+            reload_service
+            ;;
+        *)
+            echo "用法: $0 {start|stop|restart|status|logs|reload}"
+            echo ""
+            echo "命令说明:"
+            echo "  start   - 启动服务"
+            echo "  stop    - 停止服务（优雅关闭）"
+            echo "  restart - 重启服务"
+            echo "  status  - 查看服务状态"
+            echo "  logs    - 查看日志（实时）"
+            echo "  reload  - 重载配置（重启服务）"
+            echo ""
+            echo "环境变量:"
+            echo "  HOST     - 监听地址（默认: 0.0.0.0）"
+            echo "  PORT     - 监听端口（默认: 8080）"
+            echo "  WORKERS  - 工作进程数（默认: 4）"
+            echo "  TIMEOUT  - 超时时间（默认: 30）"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
