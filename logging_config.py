@@ -10,6 +10,10 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
+# 避免同一进程内重复配置导致重复添加 handler（日志打两遍）
+_alert_router_configured = False
+
+
 def setup_logging(
     log_dir: str = "logs",
     log_file: str = "alert-router.log",
@@ -18,7 +22,7 @@ def setup_logging(
     backup_count: int = 5
 ) -> logging.Logger:
     """
-    配置日志系统
+    配置日志系统（同一进程内多次调用只会生效一次，避免重复 handler 导致日志打两遍）
     
     Args:
         log_dir: 日志目录
@@ -30,6 +34,11 @@ def setup_logging(
     Returns:
         logging.Logger: 配置好的 logger 实例
     """
+    global _alert_router_configured
+    logger = logging.getLogger("alert-router")
+    if _alert_router_configured:
+        return logger
+
     # 创建日志目录
     log_path = Path(log_dir)
     log_path.mkdir(exist_ok=True)
@@ -40,8 +49,6 @@ def setup_logging(
     # 获取日志级别
     log_level = getattr(logging, level.upper(), logging.INFO)
     
-    # 创建 logger（不向 root 传递，避免与 uvicorn 等共用 root 时重复打印）
-    logger = logging.getLogger("alert-router")
     logger.setLevel(log_level)
     logger.propagate = False
     
@@ -70,7 +77,8 @@ def setup_logging(
     console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
-    
+
+    _alert_router_configured = True
     return logger
 
 
