@@ -2,10 +2,11 @@
 🚨🚨🚨🚨 状态: 告警
 {%- else -%}
 ✅✅✅✅ 状态: 恢复
-{%- endif %}
+{% endif %}
+
 
 时间: {{ startsAt }}
-{% for key, value in labels.items() -%}
+{%- for key, value in labels.items() -%}
 {% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source'] -%}
 {{ key }}: {{ value }}
 {% endif -%}
