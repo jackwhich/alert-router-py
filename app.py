@@ -71,7 +71,9 @@ def load_config():
         # send_resolved 默认为 True（如果未配置）
         send_resolved = v.get("send_resolved", True)
         
-        channel_data = {**v, "proxy": proxy, "proxy_enabled": proxy_enabled, "send_resolved": send_resolved}
+        # 创建 channel_data，排除已单独处理的字段，避免重复传递
+        channel_data = {k: v for k, v in v.items() if k not in ["enabled", "proxy", "proxy_enabled", "send_resolved"]}
+        channel_data.update({"proxy": proxy, "proxy_enabled": proxy_enabled, "send_resolved": send_resolved})
         channels[k] = Channel(name=k, enabled=enabled, **channel_data)
     return raw, channels
 
