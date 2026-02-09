@@ -27,6 +27,9 @@ wheels/
 logs/
 *.log
 
+# PID 文件
+*.pid
+
 # IDE
 .vscode/
 .idea/
