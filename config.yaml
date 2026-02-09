@@ -1,11 +1,6 @@
 server:
-  # 监听方式：支持 TCP 端口或 Unix Socket
-  # 方式1：TCP 端口（默认）
   host: 0.0.0.0
   port: 8080
-  # 方式2：Unix Socket（如果设置了 socket_path，则优先使用 socket）
-  # socket_path: "/var/run/alert-router.sock"  # Unix Socket 文件路径
-  # socket_mode: 0o666  # Socket 文件权限（默认：0o666，可读写）
 
 # 日志配置
 logging:
