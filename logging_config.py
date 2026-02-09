@@ -71,11 +71,15 @@ def setup_logging(
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     
-    # 控制台 handler：仅一个写入 stderr，避免重复打印
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    # 控制台 handler：仅在交互式终端中才添加，避免在后台运行时重复输出
+    # 检测 stderr 是否为 TTY（终端），如果是则添加 console_handler
+    # 如果 stderr 被重定向到文件（如通过 start.sh 的 2>&1），则不添加，避免日志重复
+    if sys.stderr.isatty():
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(log_level)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    
     setattr(logger, _ATTR_CONFIGURED, True)
     return logger
 
