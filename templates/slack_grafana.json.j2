@@ -1,0 +1,26 @@
+{
+  "text": "📊 *来源: Grafana* {% if status == 'firing' %}❌❌❌❌ 告警{% else %}✅✅✅✅ 恢复{% endif %}",
+  "username": "Grafana 告警",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "📊 *来源: Grafana*\n{% if status == 'firing' %}❌❌❌❌ 告警{% else %}✅✅✅✅ 恢复{% endif %}\n{% if status == 'firing' %}*告警时间*: `{{ startsAt }}`{% else %}*恢复时间*: `{{ endsAt }}`{% endif %}\n\n*告警项*: `{{ labels.alertname | default('未知告警') }}`\n*服务名称*: `{{ labels.service_name | default('未知应用') }}`\n*告警类别*: `{{ labels.category | default('未知分类') }}`\n*等级*: `{{ labels.severity | default('未知级别') }}`{% if annotations.description %}\n\n*告警详情*：\n{{ annotations.description }}{% endif %}{% if annotations.mention %}\n\n{{ annotations.mention }}{% endif %}"
+      }
+    }{% if generatorURL %},
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "View Dashboard"
+          },
+          "url": "{{ generatorURL }}"
+        }
+      ]
+    }{% endif %}
+  ]
+}

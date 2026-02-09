@@ -1,0 +1,25 @@
+📊 来源: Grafana
+
+{% if status == "firing" -%}
+🚨🚨🚨🚨🚨🚨 状态: 告警
+{%- else -%}
+✅✅✅✅✅✅ 状态: 恢复
+{% endif %}
+
+
+时间:  {{ startsAt }}
+{% for key, value in labels.items() -%}
+{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source'] -%}
+{{ key }}: {{ value }}
+{% endif -%}
+{% endfor %}
+
+{% if annotations.get('当前值') -%}
+当前值: {{ annotations.当前值 }}
+{% endif %}
+{% if annotations.summary -%}
+summary: {{ annotations.summary }}
+{%- endif %}
+{% if annotations.description -%}
+description: {{ annotations.description }}
+{%- endif %}

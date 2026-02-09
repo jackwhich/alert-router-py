@@ -81,13 +81,13 @@ channels:
     webhook_url: "https://hooks.slack.com/services/T000/B000/XXX"
     template: "slack.json.j2"
 
-  # Grafana 告警群组配置
+  # Grafana 告警群组配置（使用 Grafana 专用模板，消息中会标明来源）
   tg_grafana_critical:
     type: telegram
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567892"  # Grafana 关键告警群组
-    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
+    template: "telegram_grafana.html.j2"  # Grafana 专用模板，区分于 Prometheus
     # 示例：使用带认证的 SOCKS5 代理
     # proxy: "socks5://username:password@10.8.16.64:13080"
 
@@ -96,13 +96,13 @@ channels:
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567893"  # Grafana 警告告警群组
-    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
+    template: "telegram_grafana.html.j2"  # Grafana 专用模板
 
   slack_grafana:
     type: slack
     enabled: true
     webhook_url: "https://hooks.slack.com/services/T000/B000/YYY"
-    template: "slack.json.j2"
+    template: "slack_grafana.json.j2"  # Grafana 专用模板，用户名和来源区分
     # 示例：此渠道不走代理
     # proxy_enabled: false
 
