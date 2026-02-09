@@ -241,12 +241,33 @@ def match(labels, cond):
     return True
 
 def route(labels):
+    """
+    路由告警到渠道列表
+    支持多个规则叠加：默认渠道 + 匹配的特定规则渠道
+    
+    Returns:
+        list: 渠道名称列表（去重）
+    """
+    channels = set()
+    default_channels = []
+    
+    # 先收集所有匹配的规则和默认规则
     for r in CONFIG["routing"]:
         if "match" in r and match(labels, r["match"]):
-            return r["send_to"]
-        if r.get("default"):
-            return r["send_to"]
-    return []
+            # 匹配的规则：添加到渠道集合
+            channels.update(r["send_to"])
+        elif r.get("default"):
+            # 默认规则：记录但不立即添加（最后添加）
+            default_channels = r["send_to"]
+    
+    # 如果没有匹配到任何规则，使用默认渠道
+    if not channels and default_channels:
+        channels.update(default_channels)
+    # 如果有匹配的规则，也添加默认渠道（实现叠加效果，类似旧代码的 send_to_telegram_v2）
+    elif channels and default_channels:
+        channels.update(default_channels)
+    
+    return list(channels)
 
 def send_telegram(ch: Channel, text: str, parse_mode: Optional[str] = None):
     """

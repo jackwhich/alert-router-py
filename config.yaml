@@ -42,6 +42,14 @@ defaults:
   runbook_fallback: ""
 
 channels:
+  # 默认 Telegram 渠道（所有告警都会发送到这里，类似旧代码的 send_to_telegram_v2）
+  tg_default:
+    type: telegram
+    enabled: true
+    bot_token: "123456:AAxxxx"
+    chat_id: "-1001234567890"  # 默认告警群组
+    template: "telegram.md.j2"
+
   # Prometheus 告警群组配置
   tg_prometheus_critical:
     type: telegram
@@ -149,6 +157,7 @@ routing:
       jenkins_job: ".*"  # 匹配所有包含 jenkins_job 的告警
     send_to: ["tg_jenkins"]
 
-  # 兜底规则（兼容没有 _source 标识的旧告警）
+  # 默认路由：所有告警都发送到默认 Telegram（类似旧代码的 send_to_telegram_v2）
+  # 这个规则应该放在最后，作为兜底规则
   - default: true
-    send_to: ["slack_prometheus"]
+    send_to: ["tg_default"]
