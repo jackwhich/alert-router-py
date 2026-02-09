@@ -51,8 +51,8 @@ channels:
   prometheus_telegram_default:
     type: telegram
     enabled: true
-    bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567890"
+    bot_token: "8502571186:xxxx"
+    chat_id: "-5134533386"
     template: "prometheus_telegram.html.j2"
 
   prometheus_telegram_critical:
@@ -79,8 +79,8 @@ channels:
   grafana_telegram_default:
     type: telegram
     enabled: true
-    bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567890"  # Grafana 默认群组（可与 Prometheus 默认同群或单独建群）
+    bot_token: "8502571xxxx"
+    chat_id: "-5134533386"  # Grafana 默认群组（可与 Prometheus 默认同群或单独建群）
     template: "grafana_telegram.html.j2"
 
   grafana_telegram_critical:
@@ -112,33 +112,25 @@ channels:
     template: "prometheus_telegram_jenkins.html.j2"
     send_resolved: false  # Jenkins 告警只发送 firing，不发送 resolved（对应 Alertmanager 的 send_resolved: false）
 
-# 路由：按告警来源(_source) 决定发到哪些「发送渠道」
+# 路由：所有告警发默认渠道；severity=critical/灾难 时额外发灾难渠道（共 2 个渠道）
 routing:
-  # 告警来源 = Prometheus
+  # 告警来源 = Prometheus（支持 critical 或 灾难）
   - match:
       _source: "prometheus"
-      severity: "critical"
-    send_to: ["prometheus_telegram_critical", "prometheus_slack"]
-  - match:
-      _source: "prometheus"
-      severity: "warning"
-    send_to: ["prometheus_telegram_warning", "prometheus_slack"]
+      severity: "critical|灾难"
+    send_to: ["prometheus_telegram_critical"]
   - match:
       _source: "prometheus"
     send_to: ["prometheus_telegram_default", "prometheus_slack"]
 
-  # 告警来源 = Grafana
+  # 告警来源 = Grafana（支持 critical 或 灾难）
   - match:
       _source: "grafana"
-      severity: "critical"
-    send_to: ["grafana_telegram_critical", "grafana_slack"]
+      severity: "critical|灾难"
+    send_to: ["grafana_telegram_critical"]
   - match:
       _source: "grafana"
-      severity: "warning"
-    send_to: ["grafana_telegram_warning", "grafana_slack"]
-  - match:
-      _source: "grafana"
-    send_to: ["grafana_telegram_default", "grafana_slack"]
+    send_to: ["grafana_telegram_default"]
 
   # 其他（如 Jenkins）
   - match:
