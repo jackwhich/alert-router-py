@@ -107,11 +107,9 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
             # 默认规则：记录但不立即添加（最后添加）
             default_channels = r["send_to"]
     
-    # 如果没有匹配到任何规则，使用默认渠道
+    # 默认渠道：仅当「完全没匹配到任何规则」时使用（兜底）
+    # 有匹配的规则时，不再叠加 default，由各 match 规则自行包含「默认渠道」
     if not channels and default_channels:
-        channels.update(default_channels)
-    # 如果有匹配的规则，也添加默认渠道（实现叠加效果）
-    elif channels and default_channels:
         channels.update(default_channels)
     
     return list(channels)

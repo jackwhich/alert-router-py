@@ -41,124 +41,110 @@ defaults:
   dashboard_fallback: ""
   runbook_fallback: ""
 
+# 渠道配置说明：命名规范 = 来源_渠道_用途
+# - 来源：prometheus、grafana（谁发的告警）
+# - 渠道：telegram、slack（发到哪里）
+# - 用途：default、critical、warning、jenkins 等
+
 channels:
-  # 默认 Telegram 渠道（所有告警都会发送到这里）
-  tg_default:
+  # ---------- 来源 = Prometheus ----------
+  prometheus_telegram_default:
     type: telegram
     enabled: true
     bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567890"  # 默认告警群组
-    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
+    chat_id: "-1001234567890"
+    template: "prometheus_telegram.html.j2"
 
-  # Prometheus 告警群组配置
-  tg_prometheus_critical:
+  prometheus_telegram_critical:
     type: telegram
     enabled: true
     bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567890"  # Prometheus 关键告警群组
-    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
-    # 代理配置（可选，不配置则使用全局代理）
-    # proxy:
-    #   http: "socks5://user:pass@proxy:port"   # 带认证的 SOCKS5 代理
-    #   https: "socks5://user:pass@proxy:port"
-    # 或者使用字符串格式：
-    # proxy: "socks5://proxy:port"  # 不带认证的 SOCKS5 代理
-    # proxy: "socks5://user:pass@proxy:port"  # 带认证的 SOCKS5 代理
-    # 代理开关（可选，不配置则使用全局开关）
-    # proxy_enabled: true   # 启用代理
-    # proxy_enabled: false  # 禁用代理（此渠道不走代理）
+    chat_id: "-1001234567890"
+    template: "prometheus_telegram.html.j2"
 
-  tg_prometheus_warning:
+  prometheus_telegram_warning:
     type: telegram
     enabled: true
     bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567891"  # Prometheus 警告告警群组
-    template: "telegram.html.j2"  # 使用 HTML 格式，表情符号显示更稳定
+    chat_id: "-1001234567891"
+    template: "prometheus_telegram.html.j2"
 
-  slack_prometheus:
+  prometheus_slack:
     type: slack
     enabled: true
     webhook_url: "https://hooks.slack.com/services/T000/B000/XXX"
-    template: "slack.json.j2"
+    template: "prometheus_slack.json.j2"
 
-  # Grafana 告警群组配置（使用 Grafana 专用模板，消息中会标明来源）
-  tg_grafana_critical:
+  # ---------- 来源 = Grafana ----------
+  grafana_telegram_default:
     type: telegram
     enabled: true
     bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567892"  # Grafana 关键告警群组
-    template: "telegram_grafana.html.j2"  # Grafana 专用模板，区分于 Prometheus
-    # 示例：使用带认证的 SOCKS5 代理
-    # proxy: "socks5://username:password@10.8.16.64:13080"
+    chat_id: "-1001234567890"  # Grafana 默认群组（可与 Prometheus 默认同群或单独建群）
+    template: "grafana_telegram.html.j2"
 
-  tg_grafana_warning:
+  grafana_telegram_critical:
     type: telegram
     enabled: true
     bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567893"  # Grafana 警告告警群组
-    template: "telegram_grafana.html.j2"  # Grafana 专用模板
+    chat_id: "-1001234567892"
+    template: "grafana_telegram.html.j2"
 
-  slack_grafana:
+  grafana_telegram_warning:
+    type: telegram
+    enabled: true
+    bot_token: "123456:AAxxxx"
+    chat_id: "-1001234567893"
+    template: "grafana_telegram.html.j2"
+
+  grafana_slack:
     type: slack
     enabled: true
     webhook_url: "https://hooks.slack.com/services/T000/B000/YYY"
-    template: "slack_grafana.json.j2"  # Grafana 专用模板，用户名和来源区分
-    # 示例：此渠道不走代理
-    # proxy_enabled: false
+    template: "grafana_slack.json.j2"
 
-  # Jenkins 告警群组配置（使用 Jenkins 专用模板）
-  tg_jenkins:
+  # ---------- 其他（Jenkins 来自 Prometheus/Alertmanager） ----------
+  prometheus_telegram_jenkins:
     type: telegram
     enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567894"  # Jenkins 告警群组
-    template: "telegram_jenkins.html.j2"  # 使用 Jenkins 专用 HTML 模板
+    template: "prometheus_telegram_jenkins.html.j2"
     send_resolved: false  # Jenkins 告警只发送 firing，不发送 resolved（对应 Alertmanager 的 send_resolved: false）
 
+# 路由：按告警来源(_source) 决定发到哪些「发送渠道」
 routing:
-  # Prometheus 告警路由规则
-  # Prometheus 关键告警：发送到 Prometheus 专用群组
+  # 告警来源 = Prometheus
   - match:
       _source: "prometheus"
       severity: "critical"
-    send_to: ["tg_prometheus_critical", "slack_prometheus"]
-
-  # Prometheus 警告告警
+    send_to: ["prometheus_telegram_critical", "prometheus_slack"]
   - match:
       _source: "prometheus"
       severity: "warning"
-    send_to: ["tg_prometheus_warning", "slack_prometheus"]
-
-  # Prometheus 默认告警
+    send_to: ["prometheus_telegram_warning", "prometheus_slack"]
   - match:
       _source: "prometheus"
-    send_to: ["tg_default", "slack_prometheus"]
+    send_to: ["prometheus_telegram_default", "prometheus_slack"]
 
-  # Grafana 告警路由规则
-  # Grafana 关键告警：发送到 Grafana 专用群组
+  # 告警来源 = Grafana
   - match:
       _source: "grafana"
       severity: "critical"
-    send_to: ["tg_grafana_critical", "slack_grafana"]
-
-  # Grafana 警告告警
+    send_to: ["grafana_telegram_critical", "grafana_slack"]
   - match:
       _source: "grafana"
       severity: "warning"
-    send_to: ["tg_grafana_warning", "slack_grafana"]
-
-  # Grafana 默认告警
+    send_to: ["grafana_telegram_warning", "grafana_slack"]
   - match:
       _source: "grafana"
-    send_to: ["tg_default", "slack_grafana"]
+    send_to: ["grafana_telegram_default", "grafana_slack"]
 
-  # Jenkins 告警路由规则（包含 jenkins_job label 的告警）
+  # 其他（如 Jenkins）
   - match:
-      jenkins_job: ".*"  # 匹配所有包含 jenkins_job 的告警
-    send_to: ["tg_jenkins"]
+      jenkins_job: ".*"
+    send_to: ["prometheus_telegram_jenkins"]
 
-  # 默认路由：所有告警都会发送到默认 Telegram 渠道
-  # 这个规则应该放在最后，作为兜底规则
-  # 注意：默认渠道会与其他匹配的规则渠道叠加发送
+  # 兜底：未匹配的告警发到 Prometheus 默认 Telegram
   - default: true
-    send_to: ["tg_default"]
+    send_to: ["prometheus_telegram_default"]
