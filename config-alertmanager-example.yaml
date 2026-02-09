@@ -1,0 +1,106 @@
+# Alertmanager 配置迁移示例
+# 基于你提供的 Alertmanager 配置转换
+
+server:
+  host: 0.0.0.0
+  port: 8080
+
+# 日志配置
+logging:
+  log_dir: "logs"
+  log_file: "alert-router.log"
+  level: "INFO"
+  max_bytes: 10485760
+  backup_count: 5
+
+# 全局代理配置
+proxy:
+  http: "http://10.8.16.64:13080"
+  https: "http://10.8.16.64:13080"
+proxy_enabled: true
+
+defaults:
+  title_prefix: "[ALERT]"
+  dashboard_fallback: ""
+  runbook_fallback: ""
+
+channels:
+  # 监控宝告警渠道
+  jiankongbao:
+    type: webhook
+    enabled: true
+    webhook_url: "http://127.0.0.1:8082/webhook/"
+    template: "telegram.md.j2"  # 根据实际需求选择模板
+    send_resolved: true  # 发送 resolved 告警（对应 Alertmanager 的 send_resolved: true）
+
+  # Mango 告警渠道（多个 webhook）
+  mango_webhook1:
+    type: webhook
+    enabled: true
+    webhook_url: "http://10.8.64.57:8081/webhook/"
+    template: "telegram.md.j2"
+    send_resolved: true  # 发送 resolved 告警
+
+  mango_webhook2:
+    type: webhook
+    enabled: true
+    webhook_url: "http://10.104.166.1:31833/api/v1/dc/"
+    template: "telegram.md.j2"
+    send_resolved: true  # 发送 resolved 告警
+
+  mango_webhook3:
+    type: webhook
+    enabled: true
+    webhook_url: "http://10.108.222.114:31800/v1/prometheus/dc"
+    template: "telegram.md.j2"
+    send_resolved: true  # 发送 resolved 告警
+
+  # EBPAY 生产环境告警渠道
+  prod_ebpay:
+    type: webhook
+    enabled: true
+    webhook_url: "http://127.0.0.1:9081/webhook"
+    template: "slack.json.j2"
+    send_resolved: true  # 发送 resolved 告警（对应 Alertmanager 的 send_resolved: true）
+
+  # EBPAY 生产告警渠道
+  prod_ebpay_alarm:
+    type: webhook
+    enabled: true
+    webhook_url: "http://10.8.64.57:8081/webhook"
+    template: "telegram.md.j2"
+    send_resolved: true  # 发送 resolved 告警
+
+  # EBPAY Jenkins 告警渠道（只发送 firing，不发送 resolved）
+  prod_ebpay_jenkins_alarm:
+    type: webhook
+    enabled: true
+    webhook_url: "http://10.8.64.101:8089/webhook"
+    template: "telegram_jenkins.html.j2"
+    send_resolved: false  # 对应 Alertmanager 的 send_resolved: false
+
+routing:
+  # 1. 监控宝告警路由（匹配 alertname 正则：监控宝.*）
+  - match:
+      alertname: ".*监控宝.*"  # 正则匹配：包含"监控宝"
+    send_to: ["jiankongbao"]
+
+  # 2. Jenkins 告警路由（匹配 alertname 正则：Jenkins.*|jenkins.*）
+  # 注意：alert-router-py 支持正则匹配，使用 .* 语法
+  - match:
+      alertname: ".*Jenkins.*|.*jenkins.*"  # 匹配包含 Jenkins 或 jenkins 的告警名
+    send_to: ["prod_ebpay_jenkins_alarm"]
+    # 注意：group_by 功能在 alert-router-py 中通过告警的 labels 自动实现
+    # group_wait, group_interval, repeat_interval 需要在 Alertmanager 层面配置
+
+  # 3. EBPAY 生产环境告警路由
+  - match:
+      environment: "EBPAY-PROD"
+    send_to: ["prod_ebpay"]
+
+  # 4. 默认路由（对应 Alertmanager 的 prod_ebpay_alarm）
+  - default: true
+    send_to: ["prod_ebpay_alarm"]
+
+  # 注意：Alertmanager 的 inhibit_rules（抑制规则）需要在 Alertmanager 配置中保留
+  # alert-router-py 只负责路由分发，不处理抑制逻辑
