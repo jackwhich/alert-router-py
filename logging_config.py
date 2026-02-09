@@ -2,7 +2,8 @@
 日志配置模块
 
 提供统一的日志配置，支持文件输出和日志轮转。
-同一进程内只配置一次，且只保留一个 file、一个 console handler，避免同一条日志打两遍。
+不在本模块内自动实例化，由 app 在启动时显式调用 setup_logging。
+已配置标记挂在 logger 上，避免模块被多次导入时重复添加 handler（同一条日志打两遍）。
 """
 
 import logging
@@ -10,8 +11,8 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-# 同一进程内只配置一次（避免重复 handler 导致每条日志输出两遍）
-_logging_configured = False
+# 已配置标记存在 logger 上，保证同一 logger 只配置一次（即使用户或框架多次导入本模块）
+_ATTR_CONFIGURED = "_alert_router_logging_configured"
 
 
 def setup_logging(
@@ -22,7 +23,7 @@ def setup_logging(
     backup_count: int = 5
 ) -> logging.Logger:
     """
-    配置日志系统（同一进程内多次调用只会生效一次，避免重复 handler 导致日志打两遍）
+    配置日志系统。由 app 在启动时调用一次；若 logger 已配置过则直接返回，不重复添加 handler。
     
     Args:
         log_dir: 日志目录
@@ -34,9 +35,8 @@ def setup_logging(
     Returns:
         logging.Logger: 配置好的 logger 实例
     """
-    global _logging_configured
     logger = logging.getLogger("alert-router")
-    if _logging_configured:
+    if getattr(logger, _ATTR_CONFIGURED, False):
         return logger
 
     # 创建日志目录
@@ -76,8 +76,7 @@ def setup_logging(
     console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
-
-    _logging_configured = True
+    setattr(logger, _ATTR_CONFIGURED, True)
     return logger
 
 

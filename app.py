@@ -14,16 +14,24 @@ from alert_router.config import load_config
 from alert_router.routing import route
 from alert_router.template_renderer import render
 from alert_router.senders import send_telegram, send_webhook
+from logging_config import setup_logging
 
 # 短时去重：同一批告警在 DEDUPE_SECONDS 秒内只处理一次（避免 Grafana/客户端重复推送）
 DEDUPE_SECONDS = 10
 _dedupe_cache = {}  # key -> timestamp
 
-# 加载配置（会初始化日志系统）
+# 加载配置（config 只读配置，不初始化日志）
 CONFIG, CHANNELS = load_config()
+# 由 app 在启动时显式初始化日志（仅此一处），避免重复 handler 导致同一条日志打两遍
+log_cfg = CONFIG.get("logging", {}) or {}
+setup_logging(
+    log_dir=log_cfg.get("log_dir", "logs"),
+    log_file=log_cfg.get("log_file", "alert-router.log"),
+    level=log_cfg.get("level", "INFO"),
+    max_bytes=log_cfg.get("max_bytes", 10 * 1024 * 1024),
+    backup_count=log_cfg.get("backup_count", 5),
+)
 logger = logging.getLogger("alert-router")
-# 启动时打一次 handler 数量，便于排查「同一条日志打两遍」是否因重复 handler 导致
-logger.debug(f"logger 当前 handler 数量: {len(logger.handlers)}")
 logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
 
 
