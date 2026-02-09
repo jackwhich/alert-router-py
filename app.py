@@ -1,0 +1,330 @@
+import json
+import re
+import logging
+from dataclasses import dataclass
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone, timedelta
+import requests
+import yaml
+from fastapi import FastAPI, Request
+from jinja2 import Environment, FileSystemLoader
+from alert_normalizer import normalize
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+@dataclass
+class Channel:
+    name: str
+    type: str
+    enabled: bool = True  # 开关：是否启用此渠道
+    webhook_url: str | None = None
+    template: str | None = None
+    bot_token: str | None = None
+    chat_id: str | None = None
+    proxy: dict | None = None  # 代理配置，格式: {"http": "http://proxy:port", "https": "https://proxy:port"}
+    proxy_enabled: bool = True  # 开关：是否启用代理（此渠道）
+
+def load_config():
+    with open("config.yaml", "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+    channels = {}
+    # 获取全局代理配置和开关
+    global_proxy = raw.get("proxy", None)
+    global_proxy_enabled = raw.get("proxy_enabled", True)  # 默认启用
+    
+    for k, v in raw["channels"].items():
+        # enabled 默认为 True（如果未配置）
+        enabled = v.get("enabled", True)
+        
+        # 代理开关：优先使用渠道级别的，如果没有则使用全局开关
+        proxy_enabled = v.get("proxy_enabled", global_proxy_enabled)
+        
+        # 代理配置：优先使用渠道级别的，如果没有则使用全局代理
+        proxy = v.get("proxy", global_proxy)
+        # 如果代理配置是字符串，转换为字典格式
+        if isinstance(proxy, str):
+            proxy = {"http": proxy, "https": proxy}
+        elif proxy is False or proxy == "none":
+            proxy = None
+        
+        # 如果代理开关关闭，则不使用代理
+        if not proxy_enabled:
+            proxy = None
+        
+        channel_data = {**v, "proxy": proxy, "proxy_enabled": proxy_enabled}
+        channels[k] = Channel(name=k, enabled=enabled, **channel_data)
+    return raw, channels
+
+CONFIG, CHANNELS = load_config()
+
+env = Environment(loader=FileSystemLoader("templates"))
+
+def convert_to_cst(time_str: str) -> str:
+    """
+    将时间字符串直接加 8 小时转换为 CST（北京时间）
+    
+    支持格式：
+    - 2024-01-15T10:30:00Z
+    - 2024-01-15T10:30:00.123Z
+    - 2024-01-15 10:30:15.418 +0000 UTC
+    """
+    if not time_str or time_str == "未知时间" or time_str == "未知恢复时间":
+        return time_str
+    
+    try:
+        # 尝试解析 %Y-%m-%dT%H:%M:%S.%fZ 格式（例如：2025-03-28T00:30:15.418Z）
+        try:
+            clean_time = time_str.rstrip('Z')
+            dt = datetime.strptime(clean_time, '%Y-%m-%dT%H:%M:%S.%f')
+            # 直接加 8 小时
+            cst_dt = dt + timedelta(hours=8)
+            return cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+        
+        # 尝试解析 %Y-%m-%dT%H:%M:%SZ 格式（不带毫秒）
+        try:
+            clean_time = time_str.rstrip('Z')
+            dt = datetime.strptime(clean_time, '%Y-%m-%dT%H:%M:%S')
+            # 直接加 8 小时
+            cst_dt = dt + timedelta(hours=8)
+            return cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+        
+        # 尝试解析 %Y-%m-%d %H:%M:%S.%f +0000 UTC 格式（例如：2025-03-28 00:30:15.418 +0000 UTC）
+        try:
+            dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S.%f +0000 UTC')
+            # 直接加 8 小时
+            cst_dt = dt + timedelta(hours=8)
+            return cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+        
+        # 如果都解析失败，返回原值
+        return time_str
+    except Exception:
+        return time_str  # 如果解析失败，返回原值
+
+def replace_times_in_description(description: str) -> str:
+    """
+    替换 description 中的时间（严格匹配不破坏原有格式）
+    将 UTC 时间替换为北京时间
+    """
+    if not description:
+        return description
+    
+    try:
+        # 精确匹配时间部分的正则表达式：2025-03-28 00:30:15.418 +0000 UTC
+        time_pattern = r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \+0000 UTC)"
+        
+        # 定义替换函数
+        def replace_match(match):
+            original_time = match.group(0)
+            beijing_time = convert_to_cst(original_time)
+            return beijing_time
+        
+        # 使用正则替换所有匹配项
+        updated_description = re.sub(time_pattern, replace_match, description)
+        return updated_description
+    except Exception as e:
+        return description  # 如果替换失败，返回原值
+
+def render(template: str, ctx: Dict[str, Any]) -> str:
+    # 转换时间为 CST
+    if ctx.get("startsAt"):
+        ctx["startsAt"] = convert_to_cst(ctx["startsAt"])
+    if ctx.get("endsAt"):
+        ctx["endsAt"] = convert_to_cst(ctx["endsAt"])
+    
+    # 替换 description 中的时间（仅对 Slack 模板）
+    if template.endswith(".json.j2") and ctx.get("annotations", {}).get("description"):
+        ctx["annotations"]["description"] = replace_times_in_description(ctx["annotations"]["description"])
+    
+    return env.get_template(template).render(**ctx)
+
+def match(labels, cond):
+    """匹配路由条件，支持正则表达式（如果值是字符串且以 '.*' 结尾）"""
+    for k, v in cond.items():
+        label_value = labels.get(k)
+        if isinstance(v, str) and v.startswith(".*") and v.endswith(".*"):
+            # 正则表达式匹配：.*pattern.*
+            pattern = v[2:-2]  # 去掉首尾的 .*
+            if not re.search(pattern, str(label_value or "")):
+                return False
+        elif isinstance(v, str) and v.startswith(".*"):
+            # 正则表达式匹配：.*pattern（匹配结尾）
+            pattern = v[2:]  # 去掉开头的 .*
+            if not re.search(pattern + "$", str(label_value or "")):
+                return False
+        elif isinstance(v, str) and v.endswith(".*"):
+            # 正则表达式匹配：pattern.*（匹配开头）
+            pattern = v[:-2]  # 去掉结尾的 .*
+            if not re.search("^" + pattern, str(label_value or "")):
+                return False
+        else:
+            # 精确匹配
+            if labels.get(k) != v:
+                return False
+    return True
+
+def route(labels):
+    for r in CONFIG["routing"]:
+        if "match" in r and match(labels, r["match"]):
+            return r["send_to"]
+        if r.get("default"):
+            return r["send_to"]
+    return []
+
+def send_telegram(ch: Channel, text: str, parse_mode: Optional[str] = None):
+    """
+    发送 Telegram 消息
+    
+    Args:
+        ch: 渠道配置
+        text: 消息文本
+        parse_mode: 解析模式（None/HTML/Markdown），如果为 None 则根据模板文件名自动判断
+    
+    Returns:
+        requests.Response: HTTP 响应对象
+    """
+    url = f"https://api.telegram.org/bot{ch.bot_token}/sendMessage"
+    
+    # 如果没有指定 parse_mode，根据模板文件名判断
+    if parse_mode is None and ch.template:
+        if ch.template.endswith(".html.j2") or ch.template.endswith(".html"):
+            parse_mode = "HTML"
+        elif ch.template.endswith(".md.j2") or ch.template.endswith(".md"):
+            parse_mode = "Markdown"
+    
+    payload = {
+        "chat_id": ch.chat_id,
+        "text": text,
+        "disable_web_page_preview": True
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    
+    kwargs = {
+        "json": payload,
+        "timeout": 10
+    }
+    # 如果配置了代理，则使用代理
+    if ch.proxy:
+        kwargs["proxies"] = ch.proxy
+        kwargs["verify"] = False  # 代理通常需要禁用 SSL 验证
+    
+    try:
+        response = requests.post(url, **kwargs)
+        response.raise_for_status()
+        return response
+    except requests.exceptions.RequestException as e:
+        logger.error(f"发送 Telegram 消息失败 (渠道: {ch.name}): {e}")
+        raise
+
+def send_webhook(ch: Channel, body: str):
+    """
+    发送 Webhook 消息
+    
+    Args:
+        ch: 渠道配置
+        body: 消息体（JSON 字符串）
+    
+    Returns:
+        requests.Response: HTTP 响应对象
+    """
+    kwargs = {"timeout": 10}
+    # 如果配置了代理，则使用代理
+    if ch.proxy:
+        kwargs["proxies"] = ch.proxy
+        kwargs["verify"] = False
+    
+    try:
+        # 尝试作为 JSON 发送
+        return requests.post(ch.webhook_url, json=json.loads(body), **kwargs)
+    except (json.JSONDecodeError, ValueError):
+        # 如果不是有效的 JSON，则作为原始数据发送
+        try:
+            return requests.post(ch.webhook_url, data=body, **kwargs)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"发送 Webhook 消息失败 (渠道: {ch.name}): {e}")
+            raise
+    except requests.exceptions.RequestException as e:
+        logger.error(f"发送 Webhook 消息失败 (渠道: {ch.name}): {e}")
+        raise
+
+app = FastAPI()
+
+@app.post("/webhook")
+async def webhook(req: Request):
+    """
+    接收告警 Webhook 并路由分发
+    
+    Returns:
+        dict: 处理结果，包含成功和失败的详细信息
+    """
+    try:
+        payload = await req.json()
+        logger.info(f"收到告警请求: {json.dumps(payload, ensure_ascii=False)}")
+        
+        alerts = normalize(payload)
+        
+        if not alerts:
+            logger.warning("无法解析告警数据格式")
+            return {"ok": False, "error": "无法解析告警数据格式"}
+        
+        results = []
+
+        for a in alerts:
+            labels = a.get("labels", {})
+            alertname = labels.get("alertname", "Unknown")
+            targets = route(labels)
+            
+            logger.debug(f"告警 {alertname} 路由到渠道: {targets}")
+
+            ctx = {
+                "title": f'{CONFIG["defaults"]["title_prefix"]} {alertname}',
+                "status": a.get("status"),
+                "labels": labels,
+                "annotations": a.get("annotations", {}),
+                "startsAt": a.get("startsAt"),
+                "endsAt": a.get("endsAt"),
+                "generatorURL": a.get("generatorURL"),
+            }
+
+            for t in targets:
+                ch = CHANNELS.get(t)
+                if not ch:
+                    error_msg = f"渠道不存在: {t}"
+                    logger.warning(f"告警 {alertname}: {error_msg}")
+                    results.append({"alert": alertname, "channel": t, "error": error_msg})
+                    continue
+                
+                # 检查渠道是否启用（开关控制）
+                if not ch.enabled:
+                    logger.debug(f"告警 {alertname} 跳过已禁用的渠道: {t}")
+                    results.append({"alert": alertname, "channel": t, "skipped": "渠道已禁用"})
+                    continue
+                
+                try:
+                    body = render(ch.template, ctx)
+                    if ch.type == "telegram":
+                        send_telegram(ch, body)
+                    else:
+                        send_webhook(ch, body)
+                    logger.info(f"告警 {alertname} 已发送到渠道: {t}")
+                    results.append({"alert": alertname, "channel": t, "status": "sent"})
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}", exc_info=True)
+                    results.append({"alert": alertname, "channel": t, "error": error_msg})
+
+        return {"ok": True, "sent": results}
+    except Exception as e:
+        logger.error(f"处理 Webhook 请求失败: {e}", exc_info=True)
+        return {"ok": False, "error": f"处理失败: {str(e)}"}
