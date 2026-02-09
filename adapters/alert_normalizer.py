@@ -6,8 +6,8 @@
 
 from typing import Dict, Any, List
 from enum import Enum
-from prometheus_adapter import detect as detect_prometheus, parse as parse_prometheus
-from grafana_adapter import detect as detect_grafana, parse as parse_grafana
+from .prometheus_adapter import detect as detect_prometheus, parse as parse_prometheus
+from .grafana_adapter import detect as detect_grafana, parse as parse_grafana
 
 
 class WebhookFormat(Enum):

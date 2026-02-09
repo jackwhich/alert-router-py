@@ -3,7 +3,7 @@
 """
 import yaml
 from typing import Dict, Tuple
-from models import Channel
+from .models import Channel
 from logging_config import setup_logging, get_logger
 
 # 初始化默认 logger（会在 load_config 中根据配置文件重新配置）
