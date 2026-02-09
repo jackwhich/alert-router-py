@@ -6,12 +6,14 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
+
 from adapters.alert_normalizer import normalize
 from alert_router.config import load_config
 from alert_router.routing import route
-from alert_router.template_renderer import render
 from alert_router.senders import send_telegram, send_webhook
+from alert_router.template_renderer import render
 from logging_config import setup_logging
 
 # 加载配置（config 只读配置，不初始化日志）
@@ -37,9 +39,9 @@ async def lifespan(app: FastAPI):
     # 启动时的初始化
     logger.info("=" * 60)
     logger.info("Alert Router 服务启动")
-    server_config = CONFIG.get('server', {})
-    host = server_config.get('host')
-    port = server_config.get('port')
+    server_config = CONFIG.get("server", {})
+    host = server_config.get("host")
+    port = server_config.get("port")
     logger.info(f"监听地址: {host}:{port}")
     logger.info(f"已启用渠道数: {sum(1 for ch in CHANNELS.values() if ch.enabled)}/{len(CHANNELS)}")
     logger.info("=" * 60)
@@ -80,7 +82,7 @@ def _handle_webhook(payload: dict) -> dict:
         logger.info(f"告警 {alertname} 路由到渠道: {targets}")
 
         ctx = {
-            "title": f'{CONFIG["defaults"]["title_prefix"]} {alertname}',
+            "title": f"{CONFIG['defaults']['title_prefix']} {alertname}",
             "status": a.get("status"),
             "labels": labels,
             "annotations": a.get("annotations", {}),
@@ -120,7 +122,8 @@ def _handle_webhook(payload: dict) -> dict:
                 logger.error(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}", exc_info=True)
                 results.append({"alert": alertname, "channel": t, "error": error_msg})
         if sent_channels:
-            logger.info(f"告警 {alertname} 已发送到 {len(sent_channels)} 个渠道: {', '.join(sent_channels)} (状态: {alert_status})")
+            channels_str = ", ".join(sent_channels)
+            logger.info(f"告警 {alertname} 已发送到 {len(sent_channels)} 个渠道: {channels_str} (状态: {alert_status})")
 
     return {"ok": True, "sent": results}
 
@@ -131,11 +134,12 @@ async def webhook(req: Request):
     request_id = str(uuid.uuid4())[:8]
     try:
         payload = await req.json()
-        # 完整 payload 仅 DEBUG 输出，避免刷屏；INFO 只打一行摘要，便于区分是否收到多次请求
+        # 打印完整的接收数据
         raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
-        logger.debug(f"[{request_id}] 接收到的 Webhook 数据:\n{raw_preview}")
-        logger.info(f"[{request_id}] Webhook 收到 (status=%s, alerts=%s)",
-                    payload.get("status"), payload.get("alerts", []) and len(payload["alerts"]) or 0)
+        logger.info(f"[{request_id}] 接收到的完整 Webhook 数据:\n{raw_preview}")
+        status = payload.get("status")
+        alerts_count = len(payload.get("alerts", [])) if payload.get("alerts") else 0
+        logger.info(f"[{request_id}] Webhook 收到 (status={status}, alerts={alerts_count})")
 
         result = _handle_webhook(payload)
         if not result.get("ok"):
@@ -147,9 +151,7 @@ async def webhook(req: Request):
 
 
 if __name__ == "__main__":
-    """
-    直接启动入口（从 config.yaml 读取配置）
-    """
+    # 直接启动入口（从 config.yaml 读取配置）
     import uvicorn
     
     # 从配置读取服务器设置（必须配置）
