@@ -11,7 +11,7 @@
 {% for key, value in labels.items() -%}
 {% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source'] -%}
 {{ key }}: {{ value }}
-{% endif -%}
+{% endif %}
 {% endfor %}
 
 {% if annotations.get('当前值') -%}
