@@ -120,9 +120,9 @@ start_service() {
     mkdir -p "$(dirname "$LOG_FILE")"
     
     # 启动服务（后台运行）
-    # 使用 run.py 启动，它会自动从 config.yaml 读取 host 和 port
+    # 直接运行 app.py，它会自动从 config.yaml 读取配置
     cd "$SCRIPT_DIR"
-    WORKERS="$WORKERS" TIMEOUT="$TIMEOUT" nohup $PYTHON_CMD run.py \
+    WORKERS="$WORKERS" TIMEOUT="$TIMEOUT" nohup $PYTHON_CMD app.py \
         >> "$LOG_FILE" 2>&1 &
     
     PID=$!
