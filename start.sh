@@ -10,11 +10,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="alert-router"
 PID_FILE="${SCRIPT_DIR}/${PROJECT_NAME}.pid"
 LOG_FILE="${SCRIPT_DIR}/logs/${PROJECT_NAME}.log"
-HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8080}"
+PYTHON_CMD="${PYTHON_CMD:-python3.9}"  # 默认使用 python3.9
+
+# 从 config.yaml 读取配置（如果存在）
+CONFIG_FILE="${SCRIPT_DIR}/config.yaml"
+if [ -f "$CONFIG_FILE" ]; then
+    # 使用 Python 读取 YAML 配置
+    HOST=$(python3 -c "import yaml; f=open('$CONFIG_FILE'); c=yaml.safe_load(f); f.close(); print(c.get('server', {}).get('host', '0.0.0.0'))" 2>/dev/null || echo "0.0.0.0")
+    PORT=$(python3 -c "import yaml; f=open('$CONFIG_FILE'); c=yaml.safe_load(f); f.close(); print(c.get('server', {}).get('port', 8080))" 2>/dev/null || echo "8080")
+else
+    # 如果配置文件不存在，使用默认值
+    HOST="${HOST:-0.0.0.0}"
+    PORT="${PORT:-8080}"
+fi
+
+# 工作进程数和超时时间（可以通过环境变量覆盖）
 WORKERS="${WORKERS:-4}"
 TIMEOUT="${TIMEOUT:-30}"
-PYTHON_CMD="${PYTHON_CMD:-python3.9}"  # 默认使用 python3.9
 
 # 颜色输出
 RED='\033[0;31m'
@@ -307,11 +319,10 @@ main() {
             echo "  logs    - 查看日志（实时）"
             echo "  reload  - 重载配置（重启服务）"
             echo ""
-            echo "环境变量:"
-            echo "  HOST     - 监听地址（默认: 0.0.0.0）"
-            echo "  PORT     - 监听端口（默认: 8080）"
-            echo "  WORKERS  - 工作进程数（默认: 4）"
-            echo "  TIMEOUT  - 超时时间（默认: 30）"
+            echo "配置说明:"
+            echo "  HOST/PORT - 从 config.yaml 的 server 配置读取（可通过环境变量覆盖）"
+            echo "  WORKERS   - 工作进程数（默认: 4，可通过环境变量覆盖）"
+            echo "  TIMEOUT   - 超时时间（默认: 30，可通过环境变量覆盖）"
             exit 1
             ;;
     esac
