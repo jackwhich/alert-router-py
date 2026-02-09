@@ -81,7 +81,11 @@ def load_config():
 CONFIG, CHANNELS = load_config()
 logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
 
-env = Environment(loader=FileSystemLoader("templates"))
+env = Environment(
+    loader=FileSystemLoader("templates"),
+    trim_blocks=True,  # 移除模板标签后的第一个换行
+    lstrip_blocks=True  # 移除模板标签前的空格
+)
 
 def convert_to_cst(time_str: str) -> str:
     """
