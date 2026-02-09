@@ -7,7 +7,26 @@ Grafana Unified Alerting Webhook 适配器
 来源：Grafana Unified Alerting（Grafana 的统一告警系统）
 """
 
+import re
 from typing import Dict, Any, List
+
+
+def _parse_current_value(alert: Dict[str, Any]) -> str:
+    """
+    从 Grafana 告警中解析「当前值」。
+    优先从 values.B 获取，否则从 valueString 正则解析（兼容旧版 webhook_nginx_8081 逻辑）。
+    """
+    try:
+        values = alert.get("values")
+        if values is not None and isinstance(values, dict) and "B" in values:
+            return str(values["B"])
+    except (AttributeError, TypeError):
+        pass
+    value_string = alert.get("valueString") or ""
+    match = re.search(r"var='B' labels=\{.*?\} value=(\d+)", value_string)
+    if match:
+        return match.group(1)
+    return ""
 
 
 def detect(payload: Dict[str, Any]) -> bool:
@@ -56,17 +75,22 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if "alerts" in payload and isinstance(payload["alerts"], list):
         for alert in payload["alerts"]:
             # 添加来源标识到 labels，用于路由区分
-            labels = alert.get("labels", {})
+            labels = dict(alert.get("labels") or {})
             labels["_source"] = "grafana"  # 添加来源标识
-            
+
+            annotations = dict(alert.get("annotations") or {})
+            # 解析 Grafana 特有「当前值」（values.B 或 valueString），与 old_py/webhook_nginx_8081 一致
+            current_value = _parse_current_value(alert)
+            if current_value:
+                annotations["当前值"] = current_value
+
             alerts.append({
                 "status": alert.get("status", payload.get("status", "firing")),
                 "labels": labels,
-                "annotations": alert.get("annotations", {}),
+                "annotations": annotations,
                 "startsAt": alert.get("startsAt", ""),
                 "endsAt": alert.get("endsAt", ""),
                 "generatorURL": alert.get("generatorURL", payload.get("externalURL", "")),
-                # Grafana 特有字段（可选）
-                "fingerprint": alert.get("fingerprint", "")
+                "fingerprint": alert.get("fingerprint", ""),
             })
     return alerts
