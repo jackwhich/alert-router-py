@@ -48,81 +48,78 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, redirect_slashes=False)
+
+
+def _handle_webhook(payload: dict) -> dict:
+    """处理 webhook 请求逻辑"""
+    alerts = normalize(payload)
+    if not alerts:
+        logger.warning("无法解析告警数据格式")
+        return {"ok": False, "error": "无法解析告警数据格式"}
+
+    alert_summary = ", ".join(a.get("labels", {}).get("alertname", "?") for a in alerts)
+    logger.info(f"收到告警请求: {len(alerts)} 条 [{alert_summary}]")
+
+    results = []
+    for a in alerts:
+        labels = a.get("labels", {})
+        alertname = labels.get("alertname", "Unknown")
+        targets = route(labels, CONFIG)
+        logger.info(f"告警 {alertname} 路由到渠道: {targets}")
+
+        ctx = {
+            "title": f'{CONFIG["defaults"]["title_prefix"]} {alertname}',
+            "status": a.get("status"),
+            "labels": labels,
+            "annotations": a.get("annotations", {}),
+            "startsAt": a.get("startsAt"),
+            "endsAt": a.get("endsAt"),
+            "generatorURL": a.get("generatorURL"),
+        }
+
+        alert_status = a.get("status", "firing")
+        sent_channels = []
+        for t in targets:
+            ch = CHANNELS.get(t)
+            if not ch:
+                error_msg = f"渠道不存在: {t}"
+                logger.warning(f"告警 {alertname}: {error_msg}")
+                results.append({"alert": alertname, "channel": t, "error": error_msg})
+                continue
+            if not ch.enabled:
+                logger.debug(f"告警 {alertname} 跳过已禁用的渠道: {t}")
+                results.append({"alert": alertname, "channel": t, "skipped": "渠道已禁用"})
+                continue
+            if alert_status == "resolved" and not ch.send_resolved:
+                logger.debug(f"告警 {alertname} 跳过 resolved 状态（渠道 {t} 配置为不发送 resolved）")
+                results.append({"alert": alertname, "channel": t, "skipped": "resolved 状态已禁用"})
+                continue
+            try:
+                body = render(ch.template, ctx)
+                if ch.type == "telegram":
+                    send_telegram(ch, body)
+                else:
+                    send_webhook(ch, body)
+                sent_channels.append(t)
+                results.append({"alert": alertname, "channel": t, "status": "sent", "alert_status": alert_status})
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}", exc_info=True)
+                results.append({"alert": alertname, "channel": t, "error": error_msg})
+        if sent_channels:
+            logger.info(f"告警 {alertname} 已发送到 {len(sent_channels)} 个渠道: {', '.join(sent_channels)} (状态: {alert_status})")
+
+    return {"ok": True, "sent": results}
 
 
 @app.post("/webhook")
 async def webhook(req: Request):
-    """
-    接收告警 Webhook 并路由分发
-    
-    Returns:
-        dict: 处理结果，包含成功和失败的详细信息
-    """
+    """接收告警 Webhook 并路由分发（请使用 /webhook 无尾斜杠，避免 307）"""
     try:
         payload = await req.json()
-        logger.info(f"收到告警请求: {json.dumps(payload, ensure_ascii=False)}")
-        
-        alerts = normalize(payload)
-        
-        if not alerts:
-            logger.warning("无法解析告警数据格式")
-            return {"ok": False, "error": "无法解析告警数据格式"}
-        
-        results = []
-
-        for a in alerts:
-            labels = a.get("labels", {})
-            alertname = labels.get("alertname", "Unknown")
-            targets = route(labels, CONFIG)
-            
-            logger.debug(f"告警 {alertname} 路由到渠道: {targets}")
-
-            ctx = {
-                "title": f'{CONFIG["defaults"]["title_prefix"]} {alertname}',
-                "status": a.get("status"),
-                "labels": labels,
-                "annotations": a.get("annotations", {}),
-                "startsAt": a.get("startsAt"),
-                "endsAt": a.get("endsAt"),
-                "generatorURL": a.get("generatorURL"),
-            }
-
-            for t in targets:
-                ch = CHANNELS.get(t)
-                if not ch:
-                    error_msg = f"渠道不存在: {t}"
-                    logger.warning(f"告警 {alertname}: {error_msg}")
-                    results.append({"alert": alertname, "channel": t, "error": error_msg})
-                    continue
-                
-                # 检查渠道是否启用（开关控制）
-                if not ch.enabled:
-                    logger.debug(f"告警 {alertname} 跳过已禁用的渠道: {t}")
-                    results.append({"alert": alertname, "channel": t, "skipped": "渠道已禁用"})
-                    continue
-                
-                # 检查是否发送 resolved 状态的告警
-                alert_status = a.get("status", "firing")
-                if alert_status == "resolved" and not ch.send_resolved:
-                    logger.debug(f"告警 {alertname} 跳过 resolved 状态（渠道 {t} 配置为不发送 resolved）")
-                    results.append({"alert": alertname, "channel": t, "skipped": "resolved 状态已禁用"})
-                    continue
-                
-                try:
-                    body = render(ch.template, ctx)
-                    if ch.type == "telegram":
-                        send_telegram(ch, body)
-                    else:
-                        send_webhook(ch, body)
-                    logger.info(f"告警 {alertname} 已发送到渠道: {t} (状态: {alert_status})")
-                    results.append({"alert": alertname, "channel": t, "status": "sent", "alert_status": alert_status})
-                except Exception as e:
-                    error_msg = str(e)
-                    logger.error(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}", exc_info=True)
-                    results.append({"alert": alertname, "channel": t, "error": error_msg})
-
-        return {"ok": True, "sent": results}
+        logger.debug(f"原始请求: {json.dumps(payload, ensure_ascii=False)[:500]}...")
+        return _handle_webhook(payload)
     except Exception as e:
         logger.error(f"处理 Webhook 请求失败: {e}", exc_info=True)
         return {"ok": False, "error": f"处理失败: {str(e)}"}
