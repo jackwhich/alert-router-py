@@ -12,21 +12,12 @@ PID_FILE="${SCRIPT_DIR}/${PROJECT_NAME}.pid"
 LOG_FILE="${SCRIPT_DIR}/logs/${PROJECT_NAME}.log"
 PYTHON_CMD="${PYTHON_CMD:-python3.9}"  # 默认使用 python3.9
 
-# 从 config.yaml 读取配置（如果存在）
-CONFIG_FILE="${SCRIPT_DIR}/config.yaml"
-if [ -f "$CONFIG_FILE" ]; then
-    # 使用 Python 读取 YAML 配置
-    HOST=$(python3 -c "import yaml; f=open('$CONFIG_FILE'); c=yaml.safe_load(f); f.close(); print(c.get('server', {}).get('host', '0.0.0.0'))" 2>/dev/null || echo "0.0.0.0")
-    PORT=$(python3 -c "import yaml; f=open('$CONFIG_FILE'); c=yaml.safe_load(f); f.close(); print(c.get('server', {}).get('port', 8080))" 2>/dev/null || echo "8080")
-else
-    # 如果配置文件不存在，使用默认值
-    HOST="${HOST:-0.0.0.0}"
-    PORT="${PORT:-8080}"
-fi
-
 # 工作进程数和超时时间（可以通过环境变量覆盖）
 WORKERS="${WORKERS:-4}"
 TIMEOUT="${TIMEOUT:-30}"
+
+# 注意：host 和 port 配置从 config.yaml 读取，应用启动时会自动读取
+# 如果需要覆盖，可以通过环境变量 HOST 和 PORT 设置
 
 # 颜色输出
 RED='\033[0;31m'
@@ -121,23 +112,17 @@ start_service() {
     fi
     
     log_info "正在启动 ${PROJECT_NAME} 服务..."
-    log_info "监听地址: http://${HOST}:${PORT}"
     log_info "工作进程数: ${WORKERS}"
     log_info "日志文件: ${LOG_FILE}"
+    log_info "配置将从 config.yaml 读取"
     
     # 创建日志目录
     mkdir -p "$(dirname "$LOG_FILE")"
     
     # 启动服务（后台运行）
+    # 使用 run.py 启动，它会自动从 config.yaml 读取 host 和 port
     cd "$SCRIPT_DIR"
-    nohup $PYTHON_CMD -m uvicorn app:app \
-        --host "$HOST" \
-        --port "$PORT" \
-        --workers "$WORKERS" \
-        --timeout-keep-alive "$TIMEOUT" \
-        --log-level info \
-        --access-log \
-        --no-use-colors \
+    WORKERS="$WORKERS" TIMEOUT="$TIMEOUT" nohup $PYTHON_CMD run.py \
         >> "$LOG_FILE" 2>&1 &
     
     PID=$!
@@ -243,15 +228,16 @@ status_service() {
             ps -p "$PID" -o pid,ppid,user,%cpu,%mem,etime,cmd | head -2
         fi
         
-        # 显示端口监听情况
+        # 显示端口监听情况（从配置读取端口）
+        CONFIG_PORT=$(python3 -c "import yaml; f=open('$SCRIPT_DIR/config.yaml'); c=yaml.safe_load(f); f.close(); print(c.get('server', {}).get('port', 8080))" 2>/dev/null || echo "8080")
         if command -v netstat > /dev/null; then
             echo ""
             echo "端口监听情况:"
-            netstat -tlnp 2>/dev/null | grep ":$PORT " || echo "未找到端口 $PORT 的监听"
+            netstat -tlnp 2>/dev/null | grep ":$CONFIG_PORT " || echo "未找到端口 $CONFIG_PORT 的监听"
         elif command -v ss > /dev/null; then
             echo ""
             echo "端口监听情况:"
-            ss -tlnp 2>/dev/null | grep ":$PORT " || echo "未找到端口 $PORT 的监听"
+            ss -tlnp 2>/dev/null | grep ":$CONFIG_PORT " || echo "未找到端口 $CONFIG_PORT 的监听"
         fi
         
         return 0
@@ -320,7 +306,7 @@ main() {
             echo "  reload  - 重载配置（重启服务）"
             echo ""
             echo "配置说明:"
-            echo "  HOST/PORT - 从 config.yaml 的 server 配置读取（可通过环境变量覆盖）"
+            echo "  HOST/PORT - 从 config.yaml 的 server 配置读取"
             echo "  WORKERS   - 工作进程数（默认: 4，可通过环境变量覆盖）"
             echo "  TIMEOUT   - 超时时间（默认: 30，可通过环境变量覆盖）"
             exit 1
