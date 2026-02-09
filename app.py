@@ -307,7 +307,6 @@ def send_telegram(ch: Channel, text: str, parse_mode: Optional[str] = None):
     # 如果配置了代理，则使用代理
     if ch.proxy:
         kwargs["proxies"] = ch.proxy
-        kwargs["verify"] = False  # 代理通常需要禁用 SSL 验证
     
     try:
         response = requests.post(url, **kwargs)
@@ -332,7 +331,6 @@ def send_webhook(ch: Channel, body: str):
     # 如果配置了代理，则使用代理
     if ch.proxy:
         kwargs["proxies"] = ch.proxy
-        kwargs["verify"] = False
     
     try:
         # 尝试作为 JSON 发送
