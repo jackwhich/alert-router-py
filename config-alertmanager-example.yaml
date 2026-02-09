@@ -13,10 +13,10 @@ logging:
   max_bytes: 10485760
   backup_count: 5
 
-# 全局代理配置
+# 全局代理配置（使用 SOCKS5 代理）
 proxy:
-  http: "http://10.8.16.64:13080"
-  https: "http://10.8.16.64:13080"
+  http: "socks5://10.8.16.64:13080"
+  https: "socks5://10.8.16.64:13080"
 proxy_enabled: true
 
 defaults:
