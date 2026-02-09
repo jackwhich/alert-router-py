@@ -25,7 +25,10 @@ async def lifespan(app: FastAPI):
     # 启动时的初始化
     logger.info("=" * 60)
     logger.info("Alert Router 服务启动")
-    logger.info(f"监听地址: {CONFIG.get('server', {}).get('host', '0.0.0.0')}:{CONFIG.get('server', {}).get('port', 8080)}")
+    server_config = CONFIG.get('server', {})
+    host = server_config.get('host', '0.0.0.0')
+    port = server_config.get('port', 8080)
+    logger.info(f"监听地址: {host}:{port}")
     logger.info(f"已启用渠道数: {sum(1 for ch in CHANNELS.values() if ch.enabled)}/{len(CHANNELS)}")
     logger.info("=" * 60)
     
