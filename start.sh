@@ -14,6 +14,7 @@ HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8080}"
 WORKERS="${WORKERS:-4}"
 TIMEOUT="${TIMEOUT:-30}"
+PYTHON_CMD="${PYTHON_CMD:-python3.9}"  # 默认使用 python3.9
 
 # 颜色输出
 RED='\033[0;31m'
@@ -36,17 +37,39 @@ log_error() {
 
 # 检查 Python 环境
 check_python() {
-    if ! command -v python3 &> /dev/null; then
-        log_error "未找到 python3，请先安装 Python 3"
+    # 如果 PYTHON_CMD 未设置，则自动检测
+    if [ -z "$PYTHON_CMD" ]; then
+        # 优先使用 python3.9，如果没有则尝试 python3
+        if command -v python3.9 &> /dev/null; then
+            PYTHON_CMD="python3.9"
+        elif command -v python3 &> /dev/null; then
+            PYTHON_CMD="python3"
+            # 检查版本是否为 3.9
+            PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+            if [ "$PYTHON_VERSION" != "3.9" ]; then
+                log_warn "检测到 Python $PYTHON_VERSION，推荐使用 Python 3.9"
+            fi
+        else
+            log_error "未找到 python3.9 或 python3，请先安装 Python 3.9"
+            exit 1
+        fi
+    fi
+    
+    # 验证 Python 版本和命令是否存在
+    if ! command -v "$PYTHON_CMD" &> /dev/null; then
+        log_error "Python 命令不存在: $PYTHON_CMD"
         exit 1
     fi
+    
+    PYTHON_VERSION=$($PYTHON_CMD --version 2>&1)
+    log_info "使用 Python: $PYTHON_VERSION"
 }
 
 # 检查依赖
 check_dependencies() {
-    if ! python3 -c "import fastapi" 2>/dev/null; then
+    if ! $PYTHON_CMD -c "import fastapi" 2>/dev/null; then
         log_warn "正在安装依赖..."
-        pip3 install -r requirements.txt
+        ${PYTHON_CMD} -m pip install -r requirements.txt
     fi
 }
 
@@ -95,7 +118,7 @@ start_service() {
     
     # 启动服务（后台运行）
     cd "$SCRIPT_DIR"
-    nohup uvicorn app:app \
+    nohup $PYTHON_CMD -m uvicorn app:app \
         --host "$HOST" \
         --port "$PORT" \
         --workers "$WORKERS" \

@@ -3,12 +3,27 @@
 本服务用于接收 **Prometheus Alertmanager** 和 **Grafana Unified Alerting** 的 Webhook，  
 根据 **labels** 做路由分发，并对 **不同告警渠道（Telegram / Slack）** 进行统一模板化发送。
 
+## 环境要求
+
+- **Python 3.9**（推荐）或 Python 3.8+
+- pip 包管理器
+
 ## 快速开始
 
-### 1. 安装依赖
+### 1. 检查 Python 版本
 
 ```bash
-pip install -r requirements.txt
+python3.9 --version
+# 或
+python3 --version  # 应该显示 3.9.x
+```
+
+### 2. 安装依赖
+
+```bash
+python3.9 -m pip install -r requirements.txt
+# 或
+pip3 install -r requirements.txt
 ```
 
 ### 2. 配置
@@ -74,7 +89,7 @@ sudo journalctl -u alert-router -f
 #### 方式三：直接使用 uvicorn
 
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 8080 --workers 4
+python3.9 -m uvicorn app:app --host 0.0.0.0 --port 8080 --workers 4
 ```
 
 ### 4. 配置 Webhook
@@ -134,10 +149,11 @@ alert-router-py/
 可以通过环境变量自定义配置：
 
 ```bash
-export HOST=0.0.0.0      # 监听地址
-export PORT=8080         # 监听端口
-export WORKERS=4         # 工作进程数
-export TIMEOUT=30        # 超时时间（秒）
+export PYTHON_CMD=python3.9  # Python 命令（默认: python3.9）
+export HOST=0.0.0.0          # 监听地址
+export PORT=8080             # 监听端口
+export WORKERS=4             # 工作进程数
+export TIMEOUT=30            # 超时时间（秒）
 
 ./start.sh start
 ```

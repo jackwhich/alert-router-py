@@ -13,8 +13,8 @@ Environment="PORT=8080"
 Environment="WORKERS=4"
 Environment="TIMEOUT=30"
 
-# 启动命令
-ExecStart=/usr/bin/python3 -m uvicorn app:app --host ${HOST} --port ${PORT} --workers ${WORKERS} --timeout-keep-alive ${TIMEOUT}
+# 启动命令（使用 Python 3.9）
+ExecStart=/usr/bin/python3.9 -m uvicorn app:app --host ${HOST} --port ${PORT} --workers ${WORKERS} --timeout-keep-alive ${TIMEOUT}
 
 # 优雅关闭
 KillMode=mixed
