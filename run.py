@@ -9,10 +9,18 @@ if __name__ == "__main__":
     # 加载配置
     CONFIG, _ = load_config()
     
-    # 从配置读取服务器设置
+    # 从配置读取服务器设置（必须配置）
     server_config = CONFIG.get("server", {})
-    host = server_config.get("host", "0.0.0.0")
-    port = server_config.get("port", 8080)
+    if not server_config:
+        raise ValueError("config.yaml 中必须配置 server 节点")
+    
+    host = server_config.get("host")
+    port = server_config.get("port")
+    
+    if host is None:
+        raise ValueError("config.yaml 中必须配置 server.host")
+    if port is None:
+        raise ValueError("config.yaml 中必须配置 server.port")
     
     # 从环境变量读取工作进程数和超时时间（如果设置了）
     import os
