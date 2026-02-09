@@ -10,10 +10,6 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-# 避免同一进程内重复配置导致重复添加 handler（日志打两遍）
-_alert_router_configured = False
-
-
 def setup_logging(
     log_dir: str = "logs",
     log_file: str = "alert-router.log",
@@ -34,9 +30,9 @@ def setup_logging(
     Returns:
         logging.Logger: 配置好的 logger 实例
     """
-    global _alert_router_configured
     logger = logging.getLogger("alert-router")
-    if _alert_router_configured:
+    # 以 logger 上已有 handler 为准做幂等：若已配置过则直接返回（避免模块被不同路径导入两次时重复添加）
+    if logger.handlers:
         return logger
 
     # 创建日志目录
@@ -77,8 +73,6 @@ def setup_logging(
     console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
-
-    _alert_router_configured = True
     return logger
 
 
