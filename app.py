@@ -25,6 +25,7 @@ class Channel:
     chat_id: Optional[str] = None
     proxy: Optional[Dict[str, str]] = None  # 代理配置，格式: {"http": "http://proxy:port", "https": "https://proxy:port"}
     proxy_enabled: bool = True  # 开关：是否启用代理（此渠道）
+    send_resolved: bool = True  # 是否发送 resolved 状态的告警（默认发送）
 
 def load_config():
     with open("config.yaml", "r", encoding="utf-8") as f:
@@ -67,7 +68,10 @@ def load_config():
         if not proxy_enabled:
             proxy = None
         
-        channel_data = {**v, "proxy": proxy, "proxy_enabled": proxy_enabled}
+        # send_resolved 默认为 True（如果未配置）
+        send_resolved = v.get("send_resolved", True)
+        
+        channel_data = {**v, "proxy": proxy, "proxy_enabled": proxy_enabled, "send_resolved": send_resolved}
         channels[k] = Channel(name=k, enabled=enabled, **channel_data)
     return raw, channels
 
@@ -162,23 +166,73 @@ def render(template: str, ctx: Dict[str, Any]) -> str:
     return env.get_template(template).render(**ctx)
 
 def match(labels, cond):
-    """匹配路由条件，支持正则表达式（如果值是字符串且以 '.*' 结尾）"""
+    """
+    匹配路由条件，支持正则表达式
+    
+    支持的正则格式：
+    1. 完整正则表达式：以 '.*' 开头和结尾，如 '.*pattern.*'
+    2. 开头匹配：以 '.*' 开头，如 '.*pattern'
+    3. 结尾匹配：以 '.*' 结尾，如 'pattern.*'
+    4. Alertmanager 风格：直接使用正则，如 'Jenkins.*|jenkins.*'（自动识别）
+    5. 精确匹配：普通字符串
+    """
     for k, v in cond.items():
         label_value = labels.get(k)
-        if isinstance(v, str) and v.startswith(".*") and v.endswith(".*"):
+        label_str = str(label_value or "")
+        
+        if not isinstance(v, str):
+            # 非字符串类型，精确匹配
+            if labels.get(k) != v:
+                return False
+            continue
+        
+        # 检查是否是正则表达式（包含特殊字符或 | 符号）
+        is_regex = False
+        if "|" in v or "*" in v or "^" in v or "$" in v or "[" in v or "(" in v:
+            is_regex = True
+        
+        if is_regex:
+            # 正则表达式匹配
+            try:
+                # 如果正则不包含 ^ 或 $，则使用 search（部分匹配）
+                # 如果包含 ^ 或 $，则使用 match 或 fullmatch
+                if v.startswith("^") or v.endswith("$"):
+                    # 锚定匹配
+                    pattern = v
+                elif v.startswith(".*") and v.endswith(".*"):
+                    # 去掉首尾的 .*，使用 search
+                    pattern = v[2:-2]
+                elif v.startswith(".*"):
+                    # 去掉开头的 .*，匹配结尾
+                    pattern = v[2:] + "$"
+                elif v.endswith(".*"):
+                    # 去掉结尾的 .*，匹配开头
+                    pattern = "^" + v[:-2]
+                else:
+                    # 直接使用正则表达式
+                    pattern = v
+                
+                if not re.search(pattern, label_str):
+                    return False
+            except re.error:
+                # 正则表达式错误，回退到精确匹配
+                logger.warning(f"正则表达式错误: {v}，使用精确匹配")
+                if labels.get(k) != v:
+                    return False
+        elif v.startswith(".*") and v.endswith(".*"):
             # 正则表达式匹配：.*pattern.*
             pattern = v[2:-2]  # 去掉首尾的 .*
-            if not re.search(pattern, str(label_value or "")):
+            if not re.search(pattern, label_str):
                 return False
-        elif isinstance(v, str) and v.startswith(".*"):
+        elif v.startswith(".*"):
             # 正则表达式匹配：.*pattern（匹配结尾）
             pattern = v[2:]  # 去掉开头的 .*
-            if not re.search(pattern + "$", str(label_value or "")):
+            if not re.search(pattern + "$", label_str):
                 return False
-        elif isinstance(v, str) and v.endswith(".*"):
+        elif v.endswith(".*"):
             # 正则表达式匹配：pattern.*（匹配开头）
             pattern = v[:-2]  # 去掉结尾的 .*
-            if not re.search("^" + pattern, str(label_value or "")):
+            if not re.search("^" + pattern, label_str):
                 return False
         else:
             # 精确匹配
@@ -351,14 +405,21 @@ async def webhook(req: Request):
                     results.append({"alert": alertname, "channel": t, "skipped": "渠道已禁用"})
                     continue
                 
+                # 检查是否发送 resolved 状态的告警
+                alert_status = a.get("status", "firing")
+                if alert_status == "resolved" and not ch.send_resolved:
+                    logger.debug(f"告警 {alertname} 跳过 resolved 状态（渠道 {t} 配置为不发送 resolved）")
+                    results.append({"alert": alertname, "channel": t, "skipped": "resolved 状态已禁用"})
+                    continue
+                
                 try:
                     body = render(ch.template, ctx)
                     if ch.type == "telegram":
                         send_telegram(ch, body)
                     else:
                         send_webhook(ch, body)
-                    logger.info(f"告警 {alertname} 已发送到渠道: {t}")
-                    results.append({"alert": alertname, "channel": t, "status": "sent"})
+                    logger.info(f"告警 {alertname} 已发送到渠道: {t} (状态: {alert_status})")
+                    results.append({"alert": alertname, "channel": t, "status": "sent", "alert_status": alert_status})
                 except Exception as e:
                     error_msg = str(e)
                     logger.error(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}", exc_info=True)

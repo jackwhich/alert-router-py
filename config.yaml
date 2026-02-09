@@ -114,6 +114,7 @@ channels:
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567894"  # Jenkins 告警群组
     template: "telegram_jenkins.html.j2"  # 使用 Jenkins 专用 HTML 模板
+    send_resolved: false  # Jenkins 告警只发送 firing，不发送 resolved（对应 Alertmanager 的 send_resolved: false）
 
 routing:
   # Prometheus 告警路由规则
