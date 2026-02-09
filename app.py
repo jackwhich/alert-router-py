@@ -19,11 +19,11 @@ class Channel:
     name: str
     type: str
     enabled: bool = True  # 开关：是否启用此渠道
-    webhook_url: str | None = None
-    template: str | None = None
-    bot_token: str | None = None
-    chat_id: str | None = None
-    proxy: dict | None = None  # 代理配置，格式: {"http": "http://proxy:port", "https": "https://proxy:port"}
+    webhook_url: Optional[str] = None
+    template: Optional[str] = None
+    bot_token: Optional[str] = None
+    chat_id: Optional[str] = None
+    proxy: Optional[Dict[str, str]] = None  # 代理配置，格式: {"http": "http://proxy:port", "https": "https://proxy:port"}
     proxy_enabled: bool = True  # 开关：是否启用代理（此渠道）
 
 def load_config():
