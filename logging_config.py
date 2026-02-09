@@ -5,7 +5,7 @@
 """
 
 import logging
-import os
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -45,9 +45,8 @@ def setup_logging(
     logger.setLevel(log_level)
     logger.propagate = False
     
-    # 避免重复添加 handler
-    if logger.handlers:
-        return logger
+    # 清空已有 handler，避免多次初始化或其它地方添加导致同一条日志输出多遍
+    logger.handlers.clear()
     
     # 日志格式
     formatter = logging.Formatter(
@@ -66,8 +65,8 @@ def setup_logging(
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     
-    # 控制台 handler
-    console_handler = logging.StreamHandler()
+    # 控制台 handler：仅保留一个写入 stderr 的 handler，避免重复打印
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
