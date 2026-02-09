@@ -13,6 +13,7 @@ env = Environment(
 
 # 注册自定义过滤器
 env.filters['url_to_link'] = url_to_link
+env.filters['convert_to_cst'] = convert_to_cst
 
 
 def render(template: str, ctx: Dict[str, Any]) -> str:
