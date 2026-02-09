@@ -132,7 +132,7 @@ routing:
   # Prometheus 默认告警
   - match:
       _source: "prometheus"
-    send_to: ["slack_prometheus"]
+    send_to: ["tg_default", "slack_prometheus"]
 
   # Grafana 告警路由规则
   # Grafana 关键告警：发送到 Grafana 专用群组
@@ -150,7 +150,7 @@ routing:
   # Grafana 默认告警
   - match:
       _source: "grafana"
-    send_to: ["slack_grafana"]
+    send_to: ["tg_default", "slack_grafana"]
 
   # Jenkins 告警路由规则（包含 jenkins_job label 的告警）
   - match:
