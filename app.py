@@ -1,11 +1,9 @@
 """
 FastAPI 应用主入口
 """
-import hashlib
 import json
 import logging
 import os
-import time
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -15,10 +13,6 @@ from alert_router.routing import route
 from alert_router.template_renderer import render
 from alert_router.senders import send_telegram, send_webhook
 from logging_config import setup_logging
-
-# 短时去重：同一批告警在 DEDUPE_SECONDS 秒内只处理一次（避免 Grafana/客户端重复推送）
-DEDUPE_SECONDS = 10
-_dedupe_cache = {}  # key -> timestamp
 
 # 加载配置（config 只读配置，不初始化日志）
 CONFIG, CHANNELS = load_config()
@@ -66,22 +60,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, redirect_slashes=False)
-
-
-def _dedupe_key(payload: dict) -> str:
-    """生成去重键：优先用 groupKey（Grafana/Alertmanager），否则用 payload 哈希。"""
-    if isinstance(payload, dict) and payload.get("groupKey"):
-        return str(payload["groupKey"])
-    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def _dedupe_prune():
-    """删除过期条目，避免缓存无限增长。"""
-    now = time.time()
-    expired = [k for k, t in _dedupe_cache.items() if now - t > DEDUPE_SECONDS]
-    for k in expired:
-        del _dedupe_cache[k]
 
 
 def _handle_webhook(payload: dict) -> dict:
@@ -158,15 +136,6 @@ async def webhook(req: Request):
         logger.debug(f"[{request_id}] 接收到的 Webhook 数据:\n{raw_preview}")
         logger.info(f"[{request_id}] Webhook 收到 (status=%s, alerts=%s)",
                     payload.get("status"), payload.get("alerts", []) and len(payload["alerts"]) or 0)
-
-        # 短时去重：同一批告警在 DEDUPE_SECONDS 秒内只处理一次
-        key = _dedupe_key(payload)
-        now = time.time()
-        _dedupe_prune()
-        if key in _dedupe_cache and (now - _dedupe_cache[key]) < DEDUPE_SECONDS:
-            logger.info(f"[{request_id}] 重复 Webhook 已忽略 (key 在 {DEDUPE_SECONDS}s 内已处理)")
-            return {"ok": True, "deduplicated": True, "request_id": request_id}
-        _dedupe_cache[key] = now
 
         result = _handle_webhook(payload)
         if not result.get("ok"):
