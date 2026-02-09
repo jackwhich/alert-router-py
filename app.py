@@ -2,6 +2,7 @@
 FastAPI 应用主入口
 """
 import json
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from adapters.alert_normalizer import normalize
@@ -125,3 +126,38 @@ async def webhook(req: Request):
     except Exception as e:
         logger.error(f"处理 Webhook 请求失败: {e}", exc_info=True)
         return {"ok": False, "error": f"处理失败: {str(e)}"}
+
+
+if __name__ == "__main__":
+    """
+    直接启动入口（从 config.yaml 读取配置）
+    """
+    import uvicorn
+    
+    # 从配置读取服务器设置（必须配置）
+    server_config = CONFIG.get("server", {})
+    if not server_config:
+        raise ValueError("config.yaml 中必须配置 server 节点")
+    
+    host = server_config.get("host")
+    port = server_config.get("port")
+    
+    if host is None:
+        raise ValueError("config.yaml 中必须配置 server.host")
+    if port is None:
+        raise ValueError("config.yaml 中必须配置 server.port")
+    
+    # 从环境变量读取工作进程数和超时时间（如果设置了）
+    workers = int(os.getenv("WORKERS", 4))
+    timeout = int(os.getenv("TIMEOUT", 30))
+    
+    # 启动 uvicorn 服务器
+    uvicorn.run(
+        "app:app",
+        host=host,
+        port=port,
+        workers=workers,
+        timeout_keep_alive=timeout,
+        log_level="info",
+        access_log=True,
+    )
