@@ -28,6 +28,12 @@ pip3 install -r requirements.txt
 
 ### 2. 配置
 
+**首次使用：** 复制 `config.yaml.example` 为 `config.yaml`（`config.yaml` 已加入 .gitignore，不会提交到 GitHub，避免泄露 Token/Webhook）。可通过环境变量 `CONFIG_FILE` 指定配置文件路径。
+
+```bash
+cp config.yaml.example config.yaml
+```
+
 编辑 `config.yaml`，配置你的 Telegram Bot Token、Chat ID 和 Slack Webhook URL：
 
 ```yaml
@@ -109,7 +115,8 @@ alert-router-py/
 ├── prometheus_adapter.py  # Prometheus Alertmanager 适配器
 ├── grafana_adapter.py      # Grafana Unified Alerting 适配器
 ├── logging_config.py       # 日志配置模块
-├── config.yaml            # 配置文件
+├── config.yaml.example    # 配置模板（复制为 config.yaml 并填写真实值）
+├── config.yaml            # 本地配置文件（勿提交，已 gitignore）
 ├── requirements.txt       # Python 依赖
 ├── start.sh               # 启动脚本（支持优雅重启）
 ├── alert-router.service   # systemd 服务文件

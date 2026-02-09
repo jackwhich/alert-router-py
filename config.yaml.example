@@ -1,0 +1,94 @@
+# 复制为 config.yaml 并填写真实配置（config.yaml 已加入 .gitignore，不会提交到 GitHub）
+# cp config.yaml.example config.yaml
+
+server:
+  host: 0.0.0.0
+  port: 8080
+
+# 日志配置
+logging:
+  log_dir: "logs"
+  log_file: "alert-router.log"
+  level: "INFO"
+  max_bytes: 10485760
+  backup_count: 5
+
+proxy:
+  http: "socks5://YOUR_PROXY_HOST:PORT"
+  https: "socks5://YOUR_PROXY_HOST:PORT"
+proxy_enabled: true
+
+defaults:
+  title_prefix: "[ALERT]"
+  dashboard_fallback: ""
+  runbook_fallback: ""
+
+channels:
+  prometheus_telegram_default:
+    type: telegram
+    enabled: true
+    bot_token: "YOUR_BOT_TOKEN"
+    chat_id: "YOUR_CHAT_ID"
+    template: "prometheus_telegram.html.j2"
+
+  prometheus_telegram_critical:
+    type: telegram
+    enabled: true
+    bot_token: "YOUR_BOT_TOKEN"
+    chat_id: "YOUR_CRITICAL_CHAT_ID"
+    template: "prometheus_telegram.html.j2"
+
+  prometheus_slack:
+    type: slack
+    enabled: true
+    webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+    template: "prometheus_slack.json.j2"
+
+  grafana_telegram_default:
+    type: telegram
+    enabled: true
+    bot_token: "YOUR_BOT_TOKEN"
+    chat_id: "YOUR_CHAT_ID"
+    template: "grafana_telegram.html.j2"
+
+  grafana_telegram_critical:
+    type: telegram
+    enabled: true
+    bot_token: "YOUR_BOT_TOKEN"
+    chat_id: "YOUR_CRITICAL_CHAT_ID"
+    template: "grafana_telegram.html.j2"
+
+  grafana_slack:
+    type: slack
+    enabled: true
+    webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+    template: "grafana_slack.json.j2"
+
+  prometheus_telegram_jenkins:
+    type: telegram
+    enabled: true
+    bot_token: "YOUR_BOT_TOKEN"
+    chat_id: "YOUR_JENKINS_CHAT_ID"
+    template: "prometheus_telegram_jenkins.html.j2"
+    send_resolved: false
+
+routing:
+  - match:
+      _source: "prometheus"
+      severity: "critical|灾难"
+    send_to: ["prometheus_telegram_critical"]
+  - match:
+      _source: "prometheus"
+    send_to: ["prometheus_telegram_default", "prometheus_slack"]
+  - match:
+      _source: "grafana"
+      severity: "critical|灾难"
+    send_to: ["grafana_telegram_critical"]
+  - match:
+      _source: "grafana"
+    send_to: ["grafana_telegram_default"]
+  - match:
+      jenkins_job: ".*"
+    send_to: ["prometheus_telegram_jenkins"]
+  - default: true
+    send_to: ["prometheus_telegram_default"]

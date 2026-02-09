@@ -97,6 +97,7 @@ def _handle_webhook(payload: dict) -> dict:
                 continue
             try:
                 body = render(ch.template, ctx)
+                logger.info(f"发送到渠道 [{t}] 的内容:\n{body}")
                 if ch.type == "telegram":
                     send_telegram(ch, body)
                 else:
@@ -118,8 +119,12 @@ async def webhook(req: Request):
     """接收告警 Webhook 并路由分发（请使用 /webhook 无尾斜杠，避免 307）"""
     try:
         payload = await req.json()
-        logger.debug(f"原始请求: {json.dumps(payload, ensure_ascii=False)[:500]}...")
-        return _handle_webhook(payload)
+        raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
+        logger.info(f"接收到的 Webhook 数据:\n{raw_preview}")
+        result = _handle_webhook(payload)
+        if not result.get("ok"):
+            logger.warning(f"Webhook 处理结果异常: {result}")
+        return result
     except Exception as e:
         logger.error(f"处理 Webhook 请求失败: {e}", exc_info=True)
         return {"ok": False, "error": f"处理失败: {str(e)}"}
