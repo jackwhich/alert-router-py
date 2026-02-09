@@ -3,10 +3,16 @@
 <b>时间: </b>{{ startsAt }}
 {% for key, value in labels.items() %}
 {% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source'] %}
-<b>{{ key }}: </b><code>{{ value }}</code>
+{% if value is string and (value.startswith('http://') or value.startswith('https://')) %}
+<b>{{ key }}: </b><a href="{{ value }}">{{ value }}</a>
+{% else %}
+<b>{{ key }}: </b>{{ value }}
+{% endif %}
 {% endif %}
 {% endfor %}
-<b>summary: </b>{{ annotations.summary | default('') }}
+{% if annotations.summary %}
+<b>summary: </b>{{ annotations.summary | url_to_link }}
+{% endif %}
 {% if annotations.description %}
-<b>description: </b>{{ annotations.description }}
+<b>description: </b>{{ annotations.description | url_to_link }}
 {% endif %}
