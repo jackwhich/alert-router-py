@@ -1,12 +1,12 @@
-{% if status == "firing" %}❌❌❌❌ <b>状态:</b> 告警{% else %}✅✅✅✅ <b>状态:</b> 恢复{% endif %}
+{% if status == "firing" %}❌❌❌❌ <b>状态: </b>告警{% else %}✅✅✅✅ <b>状态: </b>恢复{% endif %}
 
-<b>时间:</b> {{ startsAt }}
+<b>时间: </b>{{ startsAt }}
 {% for key, value in labels.items() %}
 {% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source'] %}
-<b>{{ key }}:</b> <code>{{ value }}</code>
+<b>{{ key }}: </b><code>{{ value }}</code>
 {% endif %}
 {% endfor %}
-<b>summary:</b> {{ annotations.summary | default('') }}
+<b>summary: </b>{{ annotations.summary | default('') }}
 {% if annotations.description %}
-<b>description:</b> {{ annotations.description }}
+<b>description: </b>{{ annotations.description }}
 {% endif %}
