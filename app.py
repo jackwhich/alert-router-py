@@ -96,8 +96,10 @@ def convert_to_cst(time_str: str) -> str:
     - 2024-01-15T10:30:00.123Z
     - 2024-01-15 10:30:15.418 +0000 UTC
     """
-    if not time_str or time_str == "未知时间" or time_str == "未知恢复时间":
+    if not time_str or time_str == "未知时间" or time_str == "未知恢复时间" or time_str == "0001-01-01T00:00:00Z":
         return time_str
+    
+    original_time = time_str  # 保存原始值用于日志
     
     try:
         # 尝试解析 %Y-%m-%dT%H:%M:%S.%fZ 格式（例如：2025-03-28T00:30:15.418Z）
@@ -106,7 +108,9 @@ def convert_to_cst(time_str: str) -> str:
             dt = datetime.strptime(clean_time, '%Y-%m-%dT%H:%M:%S.%f')
             # 直接加 8 小时
             cst_dt = dt + timedelta(hours=8)
-            return cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+            result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+            logger.debug(f"时间转换: {original_time} (UTC) -> {result} (CST)")
+            return result
         except ValueError:
             pass
         
@@ -116,7 +120,9 @@ def convert_to_cst(time_str: str) -> str:
             dt = datetime.strptime(clean_time, '%Y-%m-%dT%H:%M:%S')
             # 直接加 8 小时
             cst_dt = dt + timedelta(hours=8)
-            return cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+            result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+            logger.debug(f"时间转换: {original_time} (UTC) -> {result} (CST)")
+            return result
         except ValueError:
             pass
         
@@ -125,13 +131,17 @@ def convert_to_cst(time_str: str) -> str:
             dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S.%f +0000 UTC')
             # 直接加 8 小时
             cst_dt = dt + timedelta(hours=8)
-            return cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+            result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+            logger.debug(f"时间转换: {original_time} (UTC) -> {result} (CST)")
+            return result
         except ValueError:
             pass
         
-        # 如果都解析失败，返回原值
+        # 如果都解析失败，记录警告并返回原值
+        logger.warning(f"无法解析时间格式: {original_time}，返回原值")
         return time_str
-    except Exception:
+    except Exception as e:
+        logger.error(f"时间转换异常: {original_time}, 错误: {e}")
         return time_str  # 如果解析失败，返回原值
 
 def replace_times_in_description(description: str) -> str:
