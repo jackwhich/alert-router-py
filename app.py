@@ -1,20 +1,29 @@
 """
 FastAPI 应用主入口
 """
+import hashlib
 import json
+import logging
 import os
+import time
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from adapters.alert_normalizer import normalize
-from logging_config import get_logger
 from alert_router.config import load_config
 from alert_router.routing import route
 from alert_router.template_renderer import render
 from alert_router.senders import send_telegram, send_webhook
 
+# 短时去重：同一批告警在 DEDUPE_SECONDS 秒内只处理一次（避免 Grafana/客户端重复推送）
+DEDUPE_SECONDS = 10
+_dedupe_cache = {}  # key -> timestamp
+
 # 加载配置（会初始化日志系统）
 CONFIG, CHANNELS = load_config()
-logger = get_logger("alert-router")
+logger = logging.getLogger("alert-router")
+# 启动时打一次 handler 数量，便于排查「同一条日志打两遍」是否因重复 handler 导致
+logger.debug(f"logger 当前 handler 数量: {len(logger.handlers)}")
 logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
 
 
@@ -49,6 +58,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, redirect_slashes=False)
+
+
+def _dedupe_key(payload: dict) -> str:
+    """生成去重键：优先用 groupKey（Grafana/Alertmanager），否则用 payload 哈希。"""
+    if isinstance(payload, dict) and payload.get("groupKey"):
+        return str(payload["groupKey"])
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _dedupe_prune():
+    """删除过期条目，避免缓存无限增长。"""
+    now = time.time()
+    expired = [k for k, t in _dedupe_cache.items() if now - t > DEDUPE_SECONDS]
+    for k in expired:
+        del _dedupe_cache[k]
 
 
 def _handle_webhook(payload: dict) -> dict:
@@ -117,16 +142,30 @@ def _handle_webhook(payload: dict) -> dict:
 @app.post("/webhook")
 async def webhook(req: Request):
     """接收告警 Webhook 并路由分发（请使用 /webhook 无尾斜杠，避免 307）"""
+    request_id = str(uuid.uuid4())[:8]
     try:
         payload = await req.json()
+        # 完整 payload 仅 DEBUG 输出，避免刷屏；INFO 只打一行摘要，便于区分是否收到多次请求
         raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
-        logger.info(f"接收到的 Webhook 数据:\n{raw_preview}")
+        logger.debug(f"[{request_id}] 接收到的 Webhook 数据:\n{raw_preview}")
+        logger.info(f"[{request_id}] Webhook 收到 (status=%s, alerts=%s)",
+                    payload.get("status"), payload.get("alerts", []) and len(payload["alerts"]) or 0)
+
+        # 短时去重：同一批告警在 DEDUPE_SECONDS 秒内只处理一次
+        key = _dedupe_key(payload)
+        now = time.time()
+        _dedupe_prune()
+        if key in _dedupe_cache and (now - _dedupe_cache[key]) < DEDUPE_SECONDS:
+            logger.info(f"[{request_id}] 重复 Webhook 已忽略 (key 在 {DEDUPE_SECONDS}s 内已处理)")
+            return {"ok": True, "deduplicated": True, "request_id": request_id}
+        _dedupe_cache[key] = now
+
         result = _handle_webhook(payload)
         if not result.get("ok"):
-            logger.warning(f"Webhook 处理结果异常: {result}")
+            logger.warning(f"[{request_id}] Webhook 处理结果异常: {result}")
         return result
     except Exception as e:
-        logger.error(f"处理 Webhook 请求失败: {e}", exc_info=True)
+        logger.error(f"[{request_id}] 处理 Webhook 请求失败: {e}", exc_info=True)
         return {"ok": False, "error": f"处理失败: {str(e)}"}
 
 

@@ -1,13 +1,17 @@
 """
 日志配置模块
 
-提供统一的日志配置，支持文件输出和日志轮转
+提供统一的日志配置，支持文件输出和日志轮转。
+同一进程内只配置一次，且只保留一个 file、一个 console handler，避免同一条日志打两遍。
 """
 
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+# 同一进程内只配置一次（避免重复 handler 导致每条日志输出两遍）
+_logging_configured = False
 
 
 def setup_logging(
@@ -30,9 +34,9 @@ def setup_logging(
     Returns:
         logging.Logger: 配置好的 logger 实例
     """
+    global _logging_configured
     logger = logging.getLogger("alert-router")
-    # 以 logger 上已有 handler 为准做幂等：若已配置过则直接返回（避免模块被不同路径导入两次时重复添加）
-    if logger.handlers:
+    if _logging_configured:
         return logger
 
     # 创建日志目录
@@ -47,8 +51,7 @@ def setup_logging(
     
     logger.setLevel(log_level)
     logger.propagate = False
-    
-    # 清空已有 handler，避免多次初始化或其它地方添加导致同一条日志输出多遍
+    # 始终清空已有 handler（防止其它地方或旧逻辑曾添加过），再只加一个 file、一个 console
     logger.handlers.clear()
     
     # 日志格式
@@ -57,7 +60,7 @@ def setup_logging(
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
-    # 文件 handler（带轮转）
+    # 文件 handler（带轮转），仅一个
     file_handler = RotatingFileHandler(
         log_file_path,
         maxBytes=max_bytes,
@@ -68,11 +71,13 @@ def setup_logging(
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     
-    # 控制台 handler：仅保留一个写入 stderr 的 handler，避免重复打印
+    # 控制台 handler：仅一个写入 stderr，避免重复打印
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
+
+    _logging_configured = True
     return logger
 
 
