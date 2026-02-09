@@ -2,7 +2,7 @@
 FastAPI 应用主入口
 """
 import json
-import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from adapters.alert_normalizer import normalize
 from logging_config import get_logger
@@ -16,28 +16,25 @@ CONFIG, CHANNELS = load_config()
 logger = get_logger("alert-router")
 logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
 
-app = FastAPI()
 
-
-@app.on_event("startup")
-async def startup_event():
-    """应用启动时的初始化"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    应用生命周期管理（替代已弃用的 on_event）
+    """
+    # 启动时的初始化
     logger.info("=" * 60)
     logger.info("Alert Router 服务启动")
     logger.info(f"监听地址: {CONFIG.get('server', {}).get('host', '0.0.0.0')}:{CONFIG.get('server', {}).get('port', 8080)}")
     logger.info(f"已启用渠道数: {sum(1 for ch in CHANNELS.values() if ch.enabled)}/{len(CHANNELS)}")
     logger.info("=" * 60)
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """应用关闭时的清理"""
+    
+    yield
+    
+    # 关闭时的清理
     logger.info("=" * 60)
     logger.info("Alert Router 服务正在关闭...")
     logger.info("等待正在处理的请求完成...")
-    
-    # 等待一小段时间，让正在处理的请求完成
-    await asyncio.sleep(1)
     
     # 关闭 requests 会话（如果有的话）
     # requests 库会自动管理连接池，这里主要是记录日志
@@ -45,6 +42,9 @@ async def shutdown_event():
     
     logger.info("Alert Router 服务已关闭")
     logger.info("=" * 60)
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.post("/webhook")
