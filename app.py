@@ -285,7 +285,20 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时的清理"""
+    logger.info("=" * 60)
     logger.info("Alert Router 服务正在关闭...")
+    logger.info("等待正在处理的请求完成...")
+    
+    # 等待一小段时间，让正在处理的请求完成
+    import asyncio
+    await asyncio.sleep(1)
+    
+    # 关闭 requests 会话（如果有的话）
+    # requests 库会自动管理连接池，这里主要是记录日志
+    logger.info("清理资源...")
+    
+    logger.info("Alert Router 服务已关闭")
+    logger.info("=" * 60)
 
 @app.post("/webhook")
 async def webhook(req: Request):
