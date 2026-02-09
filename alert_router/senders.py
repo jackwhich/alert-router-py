@@ -77,6 +77,7 @@ def send_webhook(ch: Channel, body: str):
         return requests.post(ch.webhook_url, json=json.loads(body), **kwargs)
     except (json.JSONDecodeError, ValueError):
         # 如果不是有效的 JSON，则作为原始数据发送
+        logger.debug(f"Webhook body 非 JSON，以原始数据发送 (渠道: {ch.name})")
         try:
             return requests.post(ch.webhook_url, data=body, **kwargs)
         except requests.exceptions.RequestException as e:

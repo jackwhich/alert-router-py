@@ -40,9 +40,10 @@ def setup_logging(
     # 获取日志级别
     log_level = getattr(logging, level.upper(), logging.INFO)
     
-    # 创建 logger
+    # 创建 logger（不向 root 传递，避免与 uvicorn 等共用 root 时重复打印）
     logger = logging.getLogger("alert-router")
     logger.setLevel(log_level)
+    logger.propagate = False
     
     # 避免重复添加 handler
     if logger.handlers:
