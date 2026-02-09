@@ -1,6 +1,11 @@
 server:
+  # 监听方式：支持 TCP 端口或 Unix Socket
+  # 方式1：TCP 端口（默认）
   host: 0.0.0.0
   port: 8080
+  # 方式2：Unix Socket（如果设置了 socket_path，则优先使用 socket）
+  # socket_path: "/var/run/alert-router.sock"  # Unix Socket 文件路径
+  # socket_mode: 0o666  # Socket 文件权限（默认：0o666，可读写）
 
 # 日志配置
 logging:
@@ -17,28 +22,19 @@ logging:
 
 # 全局代理配置（所有渠道默认使用，可被渠道级别配置覆盖）
 # 
-# 支持两种代理类型：
-# 1. HTTP/HTTPS 代理（推荐，简单直接）
-#    格式：http://proxy:port 或 http://user:pass@proxy:port
-#    优点：无需额外依赖，性能好，适合 HTTP/HTTPS 流量
-#    缺点：仅支持 HTTP/HTTPS 协议
-#
-# 2. SOCKS 代理（更通用，支持所有协议）
-#    格式：socks5://proxy:port 或 socks5://user:pass@proxy:port
-#    优点：支持所有协议（HTTP/HTTPS/TCP/UDP等），更灵活
-#    缺点：需要安装 requests[socks] 依赖
+# 使用 SOCKS5 代理（支持所有协议，更通用）
+# 格式：socks5://proxy:port 或 socks5://user:pass@proxy:port
+# 优点：支持所有协议（HTTP/HTTPS/TCP/UDP等），更灵活
+# 注意：需要安装 requests[socks] 依赖（已在 requirements.txt 中）
 #
 # 配置示例：
 proxy:
-  http: "http://10.8.16.64:13080"      # HTTP 代理（推荐）
-  https: "http://10.8.16.64:13080"
-# 或者使用 SOCKS 代理：
-# proxy:
-#   http: "socks5://10.8.16.64:13080"   # SOCKS5 代理
-#   https: "socks5://10.8.16.64:13080"
+  http: "socks5://10.8.16.64:13080"   # SOCKS5 代理
+  https: "socks5://10.8.16.64:13080"
 # 或者使用字符串格式（会自动应用到 http 和 https）：
-# proxy: "http://10.8.16.64:13080"      # HTTP 代理
 # proxy: "socks5://10.8.16.64:13080"    # SOCKS5 代理
+# 或者使用带认证的 SOCKS5 代理：
+# proxy: "socks5://user:pass@10.8.16.64:13080"
 
 # 全局代理开关（控制是否使用代理）
 # true: 启用代理（默认）
@@ -60,11 +56,11 @@ channels:
     template: "telegram.md.j2"
     # 代理配置（可选，不配置则使用全局代理）
     # proxy:
-    #   http: "http://user:pass@proxy:port"   # 带认证的代理
-    #   https: "http://user:pass@proxy:port"
+    #   http: "socks5://user:pass@proxy:port"   # 带认证的 SOCKS5 代理
+    #   https: "socks5://user:pass@proxy:port"
     # 或者使用字符串格式：
-    # proxy: "http://proxy:port"  # 不带认证
-    # proxy: "http://user:pass@proxy:port"  # 带认证
+    # proxy: "socks5://proxy:port"  # 不带认证的 SOCKS5 代理
+    # proxy: "socks5://user:pass@proxy:port"  # 带认证的 SOCKS5 代理
     # 代理开关（可选，不配置则使用全局开关）
     # proxy_enabled: true   # 启用代理
     # proxy_enabled: false  # 禁用代理（此渠道不走代理）
@@ -89,8 +85,8 @@ channels:
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567892"  # Grafana 关键告警群组
     template: "telegram.md.j2"
-    # 示例：使用带认证的代理
-    # proxy: "http://username:password@10.8.16.64:13080"
+    # 示例：使用带认证的 SOCKS5 代理
+    # proxy: "socks5://username:password@10.8.16.64:13080"
 
   tg_grafana_warning:
     type: telegram
