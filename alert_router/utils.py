@@ -25,6 +25,10 @@ def convert_to_cst(time_str: str) -> str:
     original_time = time_str  # 保存原始值用于日志
 
     try:
+        # 已是本地格式 YYYY-MM-DD HH:MM:SS（本函数输出或其它环节传入），直接返回避免重复解析
+        if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", time_str.strip()):
+            return time_str.strip()
+
         # Grafana/Prometheus ISO 8601 格式（带时区，如 +08:00 或 Z）
         # 微秒超过 6 位需截断，否则 fromisoformat 可能失败
         m = re.match(
