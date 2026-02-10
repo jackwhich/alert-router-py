@@ -10,6 +10,8 @@ Grafana Unified Alerting Webhook 适配器
 import re
 from typing import Dict, Any, List
 
+from . import build_alert_object
+
 
 def _parse_current_value(alert: Dict[str, Any]) -> str:
     """
@@ -76,26 +78,26 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         "externalURL": "http://grafana:3000"
     }
     """
-    alerts = []
+    alerts: List[Dict[str, Any]] = []
     if "alerts" in payload and isinstance(payload["alerts"], list):
         for alert in payload["alerts"]:
             # 添加来源标识到 labels，用于路由区分
-            labels = dict(alert.get("labels") or {})
+            labels: Dict[str, Any] = dict(alert.get("labels") or {})
             labels["_source"] = "grafana"  # 添加来源标识
 
-            annotations = dict(alert.get("annotations") or {})
+            annotations: Dict[str, Any] = dict(alert.get("annotations") or {})
             # 解析 Grafana 特有「当前值」（values.B 或 valueString），与 old_py/webhook_nginx_8081 一致
             current_value = _parse_current_value(alert)
             if current_value:
                 annotations["当前值"] = current_value
 
-            alerts.append({
-                "status": alert.get("status", payload.get("status", "firing")),
-                "labels": labels,
-                "annotations": annotations,
-                "startsAt": alert.get("startsAt", ""),
-                "endsAt": alert.get("endsAt", ""),
-                "generatorURL": alert.get("generatorURL", payload.get("externalURL", "")),
-                "fingerprint": alert.get("fingerprint", ""),
-            })
+            alerts.append(
+                build_alert_object(
+                    alert=alert,
+                    payload=payload,
+                    labels=labels,
+                    annotations=annotations,
+                    include_fingerprint=True,
+                )
+            )
     return alerts

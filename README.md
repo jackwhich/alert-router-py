@@ -21,18 +21,15 @@ python3 --version  # 应该显示 3.9.x
 ### 2. 安装依赖
 
 ```bash
-python3.9 -m pip install -r requirements.txt
+python3.9 -m pip install -r scprit/requirements.txt
 # 或
-pip3 install -r requirements.txt
+pip3 install -r scprit/requirements.txt
 ```
 
 ### 2. 配置
 
-**首次使用：** 复制 `config.yaml.example` 为 `config.yaml`（`config.yaml` 已加入 .gitignore，不会提交到 GitHub，避免泄露 Token/Webhook）。可通过环境变量 `CONFIG_FILE` 指定配置文件路径。
-
-```bash
-cp config.yaml.example config.yaml
-```
+直接编辑根目录下的 `config.yaml`（建议在本地环境中维护，并在生产环境通过配置管理下发）。  
+也可以通过环境变量 `CONFIG_FILE` 指定配置文件路径。
 
 编辑 `config.yaml`，配置你的 Telegram Bot Token、Chat ID 和 Slack Webhook URL：
 
@@ -115,28 +112,33 @@ alert-router-py/
 │   ├── alert_normalizer.py    # 统一解析入口（告警标准化）
 │   ├── prometheus_adapter.py  # Prometheus Alertmanager 适配器
 │   └── grafana_adapter.py     # Grafana Unified Alerting 适配器
-├── alert_router/          # 核心模块目录
-│   ├── config.py          # 配置加载模块
-│   ├── logging_config.py  # 日志配置模块
-│   ├── models.py          # 数据模型
-│   ├── routing.py         # 路由匹配模块
-│   ├── senders.py         # 消息发送模块
-│   ├── template_renderer.py # 模板渲染模块
-│   └── utils.py           # 工具函数模块
-├── config.yaml.example    # 配置模板（复制为 config.yaml 并填写真实值）
-├── config.yaml            # 本地配置文件（勿提交，已 gitignore）
-├── requirements.txt       # Python 依赖
-├── scprit/                # 启动 & 测试脚本目录
-│   ├── start.sh           # 启动脚本（支持优雅重启）
-│   ├── test-alertmanager.sh # 测试发送告警到 Alertmanager
-│   ├── test-webhook.sh    # 测试 webhook 的示例脚本
-│   └── alert-router.service # systemd 服务文件
-├── README.md             # 说明文档
-├── logs/                  # 日志目录（自动创建）
-│   └── alert-router.log  # 日志文件
-└── templates/            # 模板目录
-    ├── telegram.md.j2    # Telegram 模板
-    └── slack.json.j2     # Slack 模板
+├── alert_router/             # 核心模块目录
+│   ├── config.py             # 配置加载模块
+│   ├── logging_config.py     # 日志配置模块
+│   ├── models.py             # 数据模型
+│   ├── routing.py            # 路由匹配模块
+│   ├── senders.py            # 消息发送模块
+│   ├── template_renderer.py  # 模板渲染模块
+│   └── utils.py              # 工具函数模块
+├── config.yaml               # 本地配置文件
+├── scprit/                   # 启动 & 测试脚本目录
+│   ├── requirements.txt      # Python 依赖
+│   ├── start.sh              # 启动脚本（支持优雅重启）
+│   ├── test-alertmanager.sh  # 测试发送告警到 Alertmanager
+│   ├── test-webhook.sh       # 测试 webhook 的示例脚本
+│   └── alert-router.service  # systemd 服务文件
+├── docs/                     # 文档目录
+│   ├── COMPATIBILITY.md      # 新旧实现兼容性说明
+│   └── template-examples.md  # 模板与配置示例
+├── README.md                 # 说明文档
+├── logs/                     # 日志目录（自动创建）
+│   └── alert-router.log      # 日志文件
+└── templates/                # 模板目录
+    ├── grafana_slack.json.j2             # Grafana → Slack 模板
+    ├── grafana_telegram.html.j2          # Grafana → Telegram 模板
+    ├── prometheus_slack.json.j2          # Prometheus → Slack 模板
+    ├── prometheus_telegram.html.j2       # Prometheus → Telegram 模板
+    └── prometheus_telegram_jenkins.html.j2 # Jenkins 专用 Telegram 模板
 ```
 
 ## 功能特性
@@ -209,7 +211,7 @@ logging:
 
 ## 配置说明
 
-详细配置说明请参考 `template-examples.md` 文档。
+详细配置说明请参考 `docs/template-examples.md` 文档。
 
 ## 许可证
 

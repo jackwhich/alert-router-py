@@ -9,6 +9,8 @@ Prometheus Alertmanager Webhook 适配器
 
 from typing import Dict, Any, List
 
+from . import build_alert_object
+
 
 def detect(payload: Dict[str, Any]) -> bool:
     """
@@ -52,19 +54,21 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         ]
     }
     """
-    alerts = []
+    alerts: List[Dict[str, Any]] = []
     if "alerts" in payload and isinstance(payload["alerts"], list):
         for alert in payload["alerts"]:
             # 添加来源标识到 labels，用于路由区分
-            labels = alert.get("labels", {})
+            labels: Dict[str, Any] = dict(alert.get("labels") or {})
             labels["_source"] = "prometheus"  # 添加来源标识
-            
-            alerts.append({
-                "status": alert.get("status", payload.get("status", "firing")),
-                "labels": labels,
-                "annotations": alert.get("annotations", {}),
-                "startsAt": alert.get("startsAt", ""),
-                "endsAt": alert.get("endsAt", ""),
-                "generatorURL": alert.get("generatorURL", payload.get("externalURL", ""))
-            })
+
+            annotations: Dict[str, Any] = dict(alert.get("annotations") or {})
+
+            alerts.append(
+                build_alert_object(
+                    alert=alert,
+                    payload=payload,
+                    labels=labels,
+                    annotations=annotations,
+                )
+            )
     return alerts
