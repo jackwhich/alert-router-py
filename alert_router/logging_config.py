@@ -73,7 +73,7 @@ def setup_logging(
     
     # 控制台 handler：仅在交互式终端中才添加，避免在后台运行时重复输出
     # 检测 stderr 是否为 TTY（终端），如果是则添加 console_handler
-    # 如果 stderr 被重定向到文件（如通过 start.sh 的 2>&1），则不添加，避免日志重复
+    # 如果 stderr 被重定向到文件（如通过脚本启动时的 2>&1），则不添加，避免日志重复
     if sys.stderr.isatty():
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(log_level)

@@ -1,0 +1,44 @@
+[Unit]
+Description=Alert Router Service - Grafana/Prometheus Webhook Router
+After=network.target
+
+[Service]
+Type=notify
+User=root
+Group=root
+WorkingDirectory=/opt/alert-router-py
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="HOST=0.0.0.0"
+Environment="PORT=8080"
+Environment="WORKERS=4"
+Environment="TIMEOUT=30"
+
+# 启动命令（使用 Python 3.9）
+ExecStart=/usr/bin/python3.9 -m uvicorn app:app --host ${HOST} --port ${PORT} --workers ${WORKERS} --timeout-keep-alive ${TIMEOUT}
+
+# 优雅关闭
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 重启策略
+Restart=always
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alert-router
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/alert-router-py/logs
+
+[Install]
+WantedBy=multi-user.target
+
