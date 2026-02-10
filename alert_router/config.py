@@ -20,6 +20,15 @@ def _config_path() -> Path:
     return root / "config.yaml"
 
 
+def _normalize_proxy_url(url: str) -> str:
+    """
+    将 socks5:// 转为 socks5h://，使 DNS 在代理端解析，避免本机无法解析外网域名（如 hooks.slack.com）报错。
+    """
+    if url and url.startswith("socks5://") and not url.startswith("socks5h://"):
+        return "socks5h://" + url[len("socks5://") :]
+    return url
+
+
 def _validate_logging_config(raw: Dict) -> None:
     """
     校验 logging 配置必须存在且字段完整，不在代码里兜底默认值。
@@ -64,9 +73,17 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
         
         # 代理配置：优先使用渠道级别的，如果没有则使用全局代理
         proxy = v.get("proxy", global_proxy)
-        # 如果代理配置是字符串，转换为字典格式
+        # 如果代理配置是字符串，转换为字典格式，并统一使用 socks5h 以便代理端解析 DNS
         if isinstance(proxy, str):
-            proxy = {"http": proxy, "https": proxy}
+            proxy = {
+                "http": _normalize_proxy_url(proxy),
+                "https": _normalize_proxy_url(proxy),
+            }
+        elif isinstance(proxy, dict):
+            proxy = {
+                k: _normalize_proxy_url(str(v)) if isinstance(v, str) else v
+                for k, v in proxy.items()
+            }
         elif proxy is False or proxy == "none":
             proxy = None
         
