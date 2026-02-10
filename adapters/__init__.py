@@ -1,9 +1,9 @@
 """
-告警适配器模块
+告警适配器包级工具
+
+注意：此处不要导入具体 adapter/normalizer 模块，否则容易引入循环依赖。
 """
 from typing import Dict, Any
-
-from .alert_normalizer import normalize
 
 
 def build_alert_object(
@@ -32,4 +32,4 @@ def build_alert_object(
     return base
 
 
-__all__ = ["normalize", "build_alert_object"]
+__all__ = ["build_alert_object"]
