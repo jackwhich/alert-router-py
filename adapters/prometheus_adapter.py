@@ -54,21 +54,47 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         ]
     }
     """
+    raw_alerts = payload.get("alerts") or []
+    if not isinstance(raw_alerts, list):
+        return []
+
+    # 同组多条告警（多副本等）合并为一条发送，避免重复消息
+    if len(raw_alerts) > 1 and payload.get("groupKey") and payload.get("commonLabels"):
+        common_labels: Dict[str, Any] = dict(payload.get("commonLabels") or {})
+        common_labels["_source"] = "prometheus"
+        replicas = []
+        for a in raw_alerts:
+            lbl = a.get("labels") or {}
+            if "replica" in lbl:
+                replicas.append(lbl["replica"])
+        if replicas:
+            common_labels["replicas"] = ", ".join(sorted(replicas))
+            common_labels["replica_count"] = str(len(replicas))
+        common_annotations: Dict[str, Any] = dict(payload.get("commonAnnotations") or {})
+        first = raw_alerts[0]
+        merged = {
+            "status": payload.get("status", first.get("status", "firing")),
+            "labels": common_labels,
+            "annotations": common_annotations,
+            "startsAt": first.get("startsAt", ""),
+            "endsAt": first.get("endsAt", ""),
+            "generatorURL": first.get("generatorURL", payload.get("externalURL", "")),
+        }
+        return [merged]
+
     alerts: List[Dict[str, Any]] = []
-    if "alerts" in payload and isinstance(payload["alerts"], list):
-        for alert in payload["alerts"]:
-            # 添加来源标识到 labels，用于路由区分
-            labels: Dict[str, Any] = dict(alert.get("labels") or {})
-            labels["_source"] = "prometheus"  # 添加来源标识
+    for alert in raw_alerts:
+        labels: Dict[str, Any] = dict(alert.get("labels") or {})
+        labels["_source"] = "prometheus"
 
-            annotations: Dict[str, Any] = dict(alert.get("annotations") or {})
+        annotations: Dict[str, Any] = dict(alert.get("annotations") or {})
 
-            alerts.append(
-                build_alert_object(
-                    alert=alert,
-                    payload=payload,
-                    labels=labels,
-                    annotations=annotations,
-                )
+        alerts.append(
+            build_alert_object(
+                alert=alert,
+                payload=payload,
+                labels=labels,
+                annotations=annotations,
             )
+        )
     return alerts
