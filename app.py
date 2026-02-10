@@ -11,10 +11,10 @@ from fastapi import FastAPI, Request
 
 from adapters.alert_normalizer import normalize
 from alert_router.config import load_config
+from alert_router.logging_config import setup_logging
 from alert_router.routing import route
 from alert_router.senders import send_telegram, send_webhook
 from alert_router.template_renderer import render
-from logging_config import setup_logging
 
 # 加载配置（config 只读配置，不初始化日志）
 CONFIG, CHANNELS = load_config()

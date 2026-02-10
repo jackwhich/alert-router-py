@@ -4,7 +4,7 @@
 import re
 from typing import Dict, List
 
-from logging_config import get_logger
+from .logging_config import get_logger
 
 logger = get_logger("alert-router")
 

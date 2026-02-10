@@ -111,10 +111,18 @@ http://<your-host>:8080/webhook
 ```
 alert-router-py/
 ├── app.py                  # 主应用
-├── alert_normalizer.py    # 统一解析入口（告警标准化）
-├── prometheus_adapter.py  # Prometheus Alertmanager 适配器
-├── grafana_adapter.py      # Grafana Unified Alerting 适配器
-├── logging_config.py       # 日志配置模块
+├── adapters/               # 适配器目录
+│   ├── alert_normalizer.py    # 统一解析入口（告警标准化）
+│   ├── prometheus_adapter.py  # Prometheus Alertmanager 适配器
+│   └── grafana_adapter.py     # Grafana Unified Alerting 适配器
+├── alert_router/          # 核心模块目录
+│   ├── config.py          # 配置加载模块
+│   ├── logging_config.py  # 日志配置模块
+│   ├── models.py          # 数据模型
+│   ├── routing.py         # 路由匹配模块
+│   ├── senders.py         # 消息发送模块
+│   ├── template_renderer.py # 模板渲染模块
+│   └── utils.py           # 工具函数模块
 ├── config.yaml.example    # 配置模板（复制为 config.yaml 并填写真实值）
 ├── config.yaml            # 本地配置文件（勿提交，已 gitignore）
 ├── requirements.txt       # Python 依赖
