@@ -11,12 +11,15 @@
 时间: {{ startsAt }}
 
 {% for key, value in labels.items() -%}
-{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source', 'replicas'] -%}
+{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source', 'replicas', 'pods'] -%}
 {{ key }}: {{ value }}
 {% endif %}
 {% endfor %}
+{% if labels.get('pods') -%}
+pod: {{ (labels.pods | unique | sort) | join('\n\t') }}
+{% endif %}
 {% if labels.get('replicas') -%}
-replica: {{ labels.replicas | join('   ') }}
+replica: {{ (labels.replicas | unique | sort) | join('\n\t') }}
 {% endif %}
 
 {% if annotations.summary -%}
