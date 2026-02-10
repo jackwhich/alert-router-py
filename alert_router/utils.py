@@ -41,17 +41,25 @@ def convert_to_cst(time_str: str) -> str:
             # Z 表示 UTC，fromisoformat 需 +00:00
             tz_str = "+00:00" if (tz == "Z" or time_str.strip().endswith("Z")) else (tz or "+00:00")
             normalized = base + frac + tz_str
-            dt = datetime.fromisoformat(normalized)
-            # 统一转为 CST：已是 +08 则仅格式化，UTC 则加 8 小时
-            if dt.tzinfo:
-                from datetime import timezone
-                cst_dt = dt.astimezone(timezone(timedelta(hours=8)))
-                result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                cst_dt = dt + timedelta(hours=8)
-                result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
-            logger.debug(f"时间转换: {original_time} -> {result} (CST)")
-            return result
+
+            # 有些 Python 版本/实现对这种 normalized 格式支持不一致，
+            # 如果 fromisoformat 失败，则不要直接抛出，而是回退到下面的 strptime 分支。
+            try:
+                dt = datetime.fromisoformat(normalized)
+            except ValueError:
+                dt = None
+
+            if dt is not None:
+                # 统一转为 CST：已是 +08 则仅格式化，UTC 则加 8 小时
+                if dt.tzinfo:
+                    from datetime import timezone
+                    cst_dt = dt.astimezone(timezone(timedelta(hours=8)))
+                    result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    cst_dt = dt + timedelta(hours=8)
+                    result = cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+                logger.debug(f"时间转换: {original_time} -> {result} (CST)")
+                return result
 
         # 尝试解析 %Y-%m-%dT%H:%M:%S.%fZ 格式（例如：2025-03-28T00:30:15.418Z）
         try:
