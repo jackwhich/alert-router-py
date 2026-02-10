@@ -20,6 +20,20 @@ def _config_path() -> Path:
     return root / "config.yaml"
 
 
+def _validate_logging_config(raw: Dict) -> None:
+    """
+    校验 logging 配置必须存在且字段完整，不在代码里兜底默认值。
+    """
+    logging_cfg = raw.get("logging")
+    if not isinstance(logging_cfg, dict):
+        raise ValueError("config.yaml 中必须配置 logging 节点")
+
+    required_fields = ["log_dir", "log_file", "level", "max_bytes", "backup_count"]
+    missing = [field for field in required_fields if field not in logging_cfg]
+    if missing:
+        raise ValueError(f"config.yaml 中 logging 缺少必要字段: {', '.join(missing)}")
+
+
 def load_config() -> Tuple[Dict, Dict[str, Channel]]:
     """
     加载配置文件
@@ -32,6 +46,9 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
         raise FileNotFoundError(f"配置文件不存在: {path}，可设置环境变量 CONFIG_FILE 指定路径")
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
+    if raw is None:
+        raw = {}
+    _validate_logging_config(raw)
     
     channels = {}
     # 获取全局代理配置和开关

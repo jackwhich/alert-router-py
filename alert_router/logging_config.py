@@ -16,11 +16,11 @@ _ATTR_CONFIGURED = "_alert_router_logging_configured"
 
 
 def setup_logging(
-    log_dir: str = "logs",
-    log_file: str = "alert-router.log",
-    level: str = "INFO",
-    max_bytes: int = 10 * 1024 * 1024,  # 10MB
-    backup_count: int = 5
+    log_dir: str,
+    log_file: str,
+    level: str,
+    max_bytes: int,
+    backup_count: int
 ) -> logging.Logger:
     """
     配置日志系统。由 app 在启动时调用一次；若 logger 已配置过则直接返回，不重复添加 handler。

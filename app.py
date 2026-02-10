@@ -19,20 +19,14 @@ from alert_router.template_renderer import render
 # 加载配置（config 只读配置，不初始化日志）
 CONFIG, CHANNELS = load_config()
 # 由 app 在启动时显式初始化日志（仅此一处），避免重复 handler 导致同一条日志打两遍
-log_cfg = CONFIG.get("logging", {}) or {}
-setup_logging(
-    log_dir=log_cfg.get("log_dir", "logs"),
-    log_file=log_cfg.get("log_file", "alert-router.log"),
-    level=log_cfg.get("level", "INFO"),
-    max_bytes=log_cfg.get("max_bytes", 10 * 1024 * 1024),
-    backup_count=log_cfg.get("backup_count", 5),
-)
+# logging 配置由 config.yaml 提供并在 load_config 中完成完整性校验
+setup_logging(**CONFIG["logging"])
 logger = logging.getLogger("alert-router")
 logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """
     应用生命周期管理（替代已弃用的 on_event）
     """
