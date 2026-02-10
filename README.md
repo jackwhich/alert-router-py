@@ -52,26 +52,26 @@ channels:
 
 ```bash
 # 启动服务
-./start.sh start
+./scprit/start.sh start
 
 # 停止服务（优雅关闭）
-./start.sh stop
+./scprit/start.sh stop
 
 # 重启服务
-./start.sh restart
+./scprit/start.sh restart
 
 # 查看状态
-./start.sh status
+./scprit/start.sh status
 
 # 查看日志
-./start.sh logs
+./scprit/start.sh logs
 ```
 
 #### 方式二：使用 systemd（生产环境推荐）
 
 ```bash
 # 1. 复制服务文件
-sudo cp alert-router.service /etc/systemd/system/
+sudo cp scprit/alert-router.service /etc/systemd/system/
 
 # 2. 修改服务文件中的路径和用户
 sudo vi /etc/systemd/system/alert-router.service
@@ -126,8 +126,11 @@ alert-router-py/
 ├── config.yaml.example    # 配置模板（复制为 config.yaml 并填写真实值）
 ├── config.yaml            # 本地配置文件（勿提交，已 gitignore）
 ├── requirements.txt       # Python 依赖
-├── start.sh               # 启动脚本（支持优雅重启）
-├── alert-router.service   # systemd 服务文件
+├── scprit/                # 启动 & 测试脚本目录
+│   ├── start.sh           # 启动脚本（支持优雅重启）
+│   ├── test-alertmanager.sh # 测试发送告警到 Alertmanager
+│   ├── test-webhook.sh    # 测试 webhook 的示例脚本
+│   └── alert-router.service # systemd 服务文件
 ├── README.md             # 说明文档
 ├── logs/                  # 日志目录（自动创建）
 │   └── alert-router.log  # 日志文件
@@ -150,7 +153,7 @@ alert-router-py/
 
 ## 启动脚本说明
 
-启动脚本 `start.sh` 支持以下命令：
+启动脚本 `scprit/start.sh` 支持以下命令：
 
 - `start` - 启动服务
 - `stop` - 停止服务（优雅关闭，等待最多 30 秒）
@@ -170,7 +173,7 @@ export PORT=8080             # 监听端口
 export WORKERS=4             # 工作进程数
 export TIMEOUT=30            # 超时时间（秒）
 
-./start.sh start
+./scprit/start.sh start
 ```
 
 ### 优雅关闭

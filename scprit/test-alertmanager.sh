@@ -57,3 +57,4 @@ echo ""
 echo "告警已发送！"
 echo "查看 Alertmanager UI: $ALERTMANAGER_URL"
 echo "查看告警列表: $ALERTMANAGER_URL/#/alerts"
+
