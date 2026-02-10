@@ -68,7 +68,8 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             if "replica" in lbl:
                 replicas.append(lbl["replica"])
         if replicas:
-            common_labels["replicas"] = ", ".join(sorted(replicas))
+            # 有 replica 才添加；单行、多空格分隔：replica: prom-01   prom-02   prom-03
+            common_labels["replica"] = "   ".join(sorted(replicas))
         common_annotations: Dict[str, Any] = dict(payload.get("commonAnnotations") or {})
         first = raw_alerts[0]
         # 合并时 commonAnnotations 可能不含 summary，直接取第一条告警的 summary（与 old webhook-telegram 一致）
