@@ -6,8 +6,7 @@ from typing import Optional
 
 import requests
 
-from logging_config import get_logger
-
+from .logging_config import get_logger
 from .models import Channel
 
 logger = get_logger("alert-router")
