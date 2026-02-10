@@ -1,3 +1,5 @@
+📊 来源: {% if labels._source == 'grafana' %}Grafana{% else %}Prometheus{% endif %}
+
 {% if status == "firing" -%}
 🚨🚨🚨🚨🚨🚨 状态: 告警
 {%- else -%}
