@@ -13,6 +13,7 @@ from adapters.alert_normalizer import normalize
 from alert_router.config import load_config
 from alert_router.logging_config import setup_logging
 from alert_router.routing import route
+from requests.exceptions import HTTPError
 from alert_router.senders import send_telegram, send_webhook
 from alert_router.template_renderer import render
 
@@ -113,7 +114,16 @@ def _handle_webhook(payload: dict) -> dict:
                 results.append({"alert": alertname, "channel": t, "status": "sent", "alert_status": alert_status})
             except Exception as e:
                 error_msg = str(e)
-                logger.error(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}", exc_info=True)
+                # 404/401/410 为 Webhook URL 配置问题，不打印堆栈，避免被误认为代码错误
+                is_config_error = (
+                    isinstance(e, HTTPError)
+                    and e.response is not None
+                    and e.response.status_code in (401, 404, 410)
+                )
+                if is_config_error:
+                    logger.warning(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}（请检查该渠道 Webhook URL 配置）")
+                else:
+                    logger.error(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}", exc_info=True)
                 results.append({"alert": alertname, "channel": t, "error": error_msg})
         if sent_channels:
             channels_str = ", ".join(sent_channels)

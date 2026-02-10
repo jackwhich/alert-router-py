@@ -106,8 +106,21 @@ def send_webhook(ch: Channel, body: str):
                 logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
             return response
         except requests.exceptions.RequestException as e:
-            logger.error(f"发送 Webhook 消息失败 (渠道: {ch.name}): {e}")
+            _log_webhook_error(ch.name, e)
             raise
     except requests.exceptions.RequestException as e:
-        logger.error(f"发送 Webhook 消息失败 (渠道: {ch.name}): {e}")
+        _log_webhook_error(ch.name, e)
         raise
+
+
+def _log_webhook_error(channel_name: str, e: requests.exceptions.RequestException):
+    """Webhook 发送失败时统一日志：404/401/410 视为配置问题，不按代码错误报错。"""
+    if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+        code = e.response.status_code
+        if code in (401, 404, 410):
+            logger.warning(
+                f"Webhook 发送失败 (渠道: {channel_name}): HTTP {code}，"
+                "请检查该渠道的 Webhook URL 是否有效、未过期或已被删除（非代码错误）。"
+            )
+            return
+    logger.error(f"发送 Webhook 消息失败 (渠道: {channel_name}): {e}")

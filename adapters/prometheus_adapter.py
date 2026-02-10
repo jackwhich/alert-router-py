@@ -58,18 +58,10 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not isinstance(raw_alerts, list):
         return []
 
-    # 同组多条告警（多副本等）合并为一条发送，避免重复消息
+    # 同组多条告警合并为一条发送，避免重复消息；仅使用 payload 的 commonLabels，不做额外汇总
     if len(raw_alerts) > 1 and payload.get("groupKey") and payload.get("commonLabels"):
         common_labels: Dict[str, Any] = dict(payload.get("commonLabels") or {})
         common_labels["_source"] = "prometheus"
-        replicas = []
-        for a in raw_alerts:
-            lbl = a.get("labels") or {}
-            if "replica" in lbl:
-                replicas.append(lbl["replica"])
-        if replicas:
-            common_labels["replicas"] = ", ".join(sorted(replicas))
-            common_labels["replica_count"] = str(len(replicas))
         common_annotations: Dict[str, Any] = dict(payload.get("commonAnnotations") or {})
         first = raw_alerts[0]
         merged = {
