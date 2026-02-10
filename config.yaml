@@ -19,17 +19,17 @@ logging:
 # 
 # 使用 SOCKS5 代理（支持所有协议，更通用）
 # 格式：socks5://proxy:port 或 socks5://user:pass@proxy:port
-# 优点：支持所有协议（HTTP/HTTPS/TCP/UDP等），更灵活
+# 程序会自动使用 socks5h（由代理端解析 DNS），本机无需能解析外网域名（如 hooks.slack.com）
 # 注意：需要安装 requests[socks] 依赖（已在 requirements.txt 中）
 #
-# 配置示例：
+# 配置示例（请按实际代理地址/端口修改，例如 10.8.16.64:33080）：
 proxy:
   http: "socks5://10.8.16.64:13080"   # SOCKS5 代理
   https: "socks5://10.8.16.64:13080"
 # 或者使用字符串格式（会自动应用到 http 和 https）：
-# proxy: "socks5://10.8.16.64:13080"    # SOCKS5 代理
+# proxy: "socks5://10.8.16.64:33080"    # SOCKS5 代理
 # 或者使用带认证的 SOCKS5 代理：
-# proxy: "socks5://user:pass@10.8.16.64:13080"
+# proxy: "socks5://user:pass@10.8.16.64:33080"
 
 # 全局代理开关（控制是否使用代理）
 # true: 启用代理（默认）
