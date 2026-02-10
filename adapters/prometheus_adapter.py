@@ -63,13 +63,17 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         common_labels: Dict[str, Any] = dict(payload.get("commonLabels") or {})
         common_labels["_source"] = "prometheus"
         replicas = []
+        pods = []
         for a in raw_alerts:
             lbl = a.get("labels") or {}
             if "replica" in lbl:
                 replicas.append(lbl["replica"])
+            if "pod" in lbl:
+                pods.append(lbl["pod"])
         if replicas:
-            # 只传数据，展示格式由 j2 模板控制
-            common_labels["replicas"] = sorted(replicas)
+            common_labels["replicas"] = replicas
+        if pods:
+            common_labels["pods"] = pods
         common_annotations: Dict[str, Any] = dict(payload.get("commonAnnotations") or {})
         first = raw_alerts[0]
         # 合并时 commonAnnotations 可能不含 summary，直接取第一条告警的 summary（与 old webhook-telegram 一致）
