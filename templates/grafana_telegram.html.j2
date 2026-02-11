@@ -10,9 +10,9 @@
 时间:  {{ startsAt }}
 {% for key, value in labels.items() %}
 {% if value is sequence and (value is not string) %}
-{{ key }}: {{ value | unique | sort | join(', ') }}
+{{ key }}: {{ value | unique | sort | join(', ') }}<br>
 {% else %}
-{{ key }}: {{ value }}
+{{ key }}: {{ value }}<br>
 {% endif %}
 {% endfor %}
 
