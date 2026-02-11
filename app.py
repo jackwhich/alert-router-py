@@ -126,6 +126,9 @@ def _handle_webhook(payload: dict) -> dict:
                     # 如果启用代理，从渠道配置获取代理设置
                     plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
                 prometheus_url = image_cfg.get("prometheus_url") or None
+                # 根据告警状态选择时间：firing 用 startsAt，resolved 用 endsAt
+                alert_time = a.get("endsAt") if alert_status == "resolved" else a.get("startsAt")
+                
                 image_bytes = generate_plot_from_generator_url(
                     a.get("generatorURL", ""),
                     prometheus_url=prometheus_url,
@@ -134,6 +137,8 @@ def _handle_webhook(payload: dict) -> dict:
                     step=str(image_cfg.get("step", "30s")),
                     timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
                     max_series=int(image_cfg.get("max_series", 8)),
+                    alertname=alertname,
+                    alert_time=alert_time,
                 )
                 if image_bytes:
                     logger.info(f"告警 {alertname} 已生成趋势图，将优先按图片发送 Telegram")
@@ -161,6 +166,9 @@ def _handle_webhook(payload: dict) -> dict:
                     plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
                 grafana_url = image_cfg.get("grafana_url") or None
                 prometheus_url = image_cfg.get("prometheus_url") or None
+                # 根据告警状态选择时间：firing 用 startsAt，resolved 用 endsAt
+                alert_time = a.get("endsAt") if alert_status == "resolved" else a.get("startsAt")
+                
                 image_bytes = generate_plot_from_grafana_generator_url(
                     a.get("generatorURL", ""),
                     grafana_url=grafana_url,
@@ -170,6 +178,8 @@ def _handle_webhook(payload: dict) -> dict:
                     step=str(image_cfg.get("step", "30s")),
                     timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
                     max_series=int(image_cfg.get("max_series", 8)),
+                    alertname=alertname,
+                    alert_time=alert_time,
                 )
                 if image_bytes:
                     logger.info(f"告警 {alertname} 已生成趋势图，将优先按图片发送 Telegram")

@@ -7,11 +7,13 @@ Prometheus 趋势图生成模块
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from io import BytesIO
 from typing import Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
 import matplotlib
+import matplotlib.dates as mdates
 import requests
 
 from .logging_config import get_logger
@@ -37,6 +39,41 @@ def _build_series_label(metric: Dict[str, str]) -> str:
     return label
 
 
+def _infer_yaxis_label(alertname: Optional[str], result: list) -> str:
+    """根据告警名称和数据特征推断更专业的Y轴标签。"""
+    if not alertname:
+        return "Metric Value"
+    
+    alertname_lower = alertname.lower()
+    
+    # 根据告警名称关键词推断
+    if any(keyword in alertname_lower for keyword in ['count', '次数', '数量', '个', '次']):
+        return "Count"
+    elif any(keyword in alertname_lower for keyword in ['rate', '速率', '速度', 'qps', 'rps', 'tps']):
+        return "Rate"
+    elif any(keyword in alertname_lower for keyword in ['percent', '百分比', '%', 'percentile']):
+        return "Percentage (%)"
+    elif any(keyword in alertname_lower for keyword in ['latency', '延迟', 'time', 'duration', '耗时']):
+        return "Latency (ms)"
+    elif any(keyword in alertname_lower for keyword in ['memory', '内存', 'mem']):
+        return "Memory (MB)"
+    elif any(keyword in alertname_lower for keyword in ['cpu', 'cpu使用率']):
+        return "CPU Usage (%)"
+    elif any(keyword in alertname_lower for keyword in ['disk', '磁盘', 'storage']):
+        return "Disk Usage (%)"
+    elif any(keyword in alertname_lower for keyword in ['error', '错误', '失败', 'fail']):
+        return "Error Count"
+    elif any(keyword in alertname_lower for keyword in ['request', '请求', 'req']):
+        return "Request Count"
+    elif any(keyword in alertname_lower for keyword in ['status', '状态码', 'status code']):
+        return "Status Code Count"
+    elif any(keyword in alertname_lower for keyword in ['throughput', '吞吐量', 'throughput']):
+        return "Throughput"
+    
+    # 如果无法推断，使用通用的专业术语
+    return "Metric Value"
+
+
 def generate_plot_from_generator_url(
     generator_url: str,
     *,
@@ -46,6 +83,8 @@ def generate_plot_from_generator_url(
     step: str = "30s",
     timeout_seconds: int = 8,
     max_series: int = 8,
+    alertname: Optional[str] = None,
+    alert_time: Optional[str] = None,
 ) -> Optional[bytes]:
     """
     根据 generatorURL 生成 Prometheus 趋势图。
@@ -113,16 +152,25 @@ def generate_plot_from_generator_url(
         # 创建图表，使用更大的尺寸和更高的DPI以获得更好的质量
         fig, ax = plt.subplots(figsize=(12, 6), dpi=150)
         
-        # 设置中文字体支持（如果需要）
-        plt.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans', 'Liberation Sans']
+        # 设置中文字体支持
+        import platform
+        if platform.system() == 'Darwin':  # macOS
+            plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'PingFang SC', 'STHeiti', 'Arial']
+        elif platform.system() == 'Linux':
+            plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'DejaVu Sans', 'Liberation Sans']
+        else:  # Windows
+            plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial']
         plt.rcParams['axes.unicode_minus'] = False
         
         plotted = 0
-        colors = plt.cm.tab10(range(max_series))  # 使用不同颜色区分多条曲线
+        # 使用更鲜艳、对比度更好的颜色方案
+        # 使用 Set2 或 Set3 调色板，颜色更鲜艳
+        colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e']
+        # 如果数据系列超过预设颜色数量，使用调色板生成更多颜色
+        if len(result) > len(colors):
+            colors = plt.cm.Set2(range(len(result)))
         
         for idx, series in enumerate(result):
-            if plotted >= max_series:
-                break
             values = series.get("values") or []
             if not values:
                 continue
@@ -136,7 +184,10 @@ def generate_plot_from_generator_url(
                     val = float(item[1])
                 except (TypeError, ValueError):
                     continue
-                xs.append(datetime.fromtimestamp(ts, tz=timezone.utc))
+                # 将 UTC 时间转换为 UTC+8
+                utc_time = datetime.fromtimestamp(ts, tz=timezone.utc)
+                utc8_time = utc_time.astimezone(ZoneInfo("Asia/Shanghai"))
+                xs.append(utc8_time)
                 ys.append(val)
             if not xs:
                 continue
@@ -149,7 +200,9 @@ def generate_plot_from_generator_url(
                 continue
             
             label = _build_series_label(series.get("metric") or {})
-            ax.plot(xs, ys, linewidth=2.0, label=label, color=colors[idx], marker='o', markersize=3, alpha=0.8)
+            # 使用模运算确保颜色索引不越界
+            color = colors[idx % len(colors)]
+            ax.plot(xs, ys, linewidth=2.5, label=label, color=color, marker='o', markersize=4, alpha=0.9)
             plotted += 1
 
         if plotted == 0:
@@ -157,23 +210,100 @@ def generate_plot_from_generator_url(
             logger.info("Prometheus query_range 结果无法解析为曲线，跳过出图")
             return None
 
-        # 优化图表样式
-        ax.set_title("Prometheus Alert Trend", fontsize=14, fontweight='bold', pad=15)
-        ax.set_xlabel("Time (UTC)", fontsize=11)
-        ax.set_ylabel("Value", fontsize=11)
+        # 优化图表样式 - 使用实际的 alertname 作为标题（深色主题）
+        chart_title = alertname if alertname else "Prometheus Alert Trend"
+        ax.set_title(chart_title, fontsize=18, fontweight='bold', pad=25, color='#e0e0e0')
         
-        # 改进网格样式
-        ax.grid(True, linestyle="--", alpha=0.4, linewidth=0.8)
+        # X轴标签显示告警时间（UTC+8，到秒）
+        if alert_time:
+            try:
+                # 解析告警时间并转换为 UTC+8
+                from dateutil import parser
+                alert_dt = parser.parse(alert_time)
+                if alert_dt.tzinfo is None:
+                    # 如果没有时区信息，假设是 UTC
+                    alert_dt = alert_dt.replace(tzinfo=timezone.utc)
+                # 转换为 UTC+8
+                alert_dt_utc8 = alert_dt.astimezone(ZoneInfo("Asia/Shanghai"))
+                # 格式化为字符串：年-月-日 时:分:秒
+                xlabel_text = alert_dt_utc8.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                # 如果解析失败，使用默认标签
+                xlabel_text = "Time (UTC+8)"
+        else:
+            xlabel_text = "Time (UTC+8)"
+        
+        ax.set_xlabel(xlabel_text, fontsize=13, color='#e0e0e0', fontweight='normal')
+        
+        # Y轴不显示标签，保持简洁
+        ax.set_ylabel("", fontsize=0)
+        
+        # 优化Y轴数值格式 - 使用K格式（类似Grafana）
+        def format_y_value(x, p):
+            if abs(x) >= 1000:
+                return f'{x/1000:.2f} K'.rstrip('0').rstrip('.')
+            elif x == int(x):
+                return f'{int(x)}'
+            else:
+                return f'{x:.1f}'
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(format_y_value))
+        ax.tick_params(axis='y', labelsize=11, colors='#e0e0e0', width=1)
+        ax.tick_params(axis='x', labelsize=10, colors='#e0e0e0', width=1)
+        
+        # 改进网格样式 - 更明显的网格线（深色主题）
+        ax.grid(True, linestyle="--", alpha=0.3, linewidth=0.8, color='#666666')
         ax.set_axisbelow(True)
         
-        # 优化图例显示
-        ax.legend(loc="best", fontsize=9, framealpha=0.9, fancybox=True, shadow=True)
+        # 设置坐标轴颜色（深色主题）
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_color('#666666')
+        ax.spines['bottom'].set_color('#666666')
+        ax.spines['left'].set_linewidth(1.5)
+        ax.spines['bottom'].set_linewidth(1.5)
         
-        # 优化时间轴显示
+        # 优化图例显示 - 放在右侧（类似Grafana）
+        if plotted > 0:
+            legend = ax.legend(
+                loc="center left",  # 放在右侧
+                bbox_to_anchor=(1.02, 0.5),  # 稍微偏移到图表外
+                fontsize=11,  # 字体大小
+                framealpha=0.9,  # 透明度
+                fancybox=True,
+                shadow=False,
+                edgecolor='#666666',
+                facecolor='#2b2b2b',  # 深色背景
+                borderpad=0.8,
+                labelspacing=0.6,
+                handlelength=1.5,
+                handletextpad=0.5
+            )
+            # 设置图例文字颜色（浅色，适合深色背景）
+            for text in legend.get_texts():
+                text.set_color('#e0e0e0')
+                text.set_fontweight('normal')
+        
+        # 优化时间轴显示 - 只显示时间（时:分:秒），不显示日期
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S', tz=ZoneInfo("Asia/Shanghai")))
+        # 根据时间范围自动调整刻度间隔
+        if len(xs) > 0:
+            time_span = (max(xs) - min(xs)).total_seconds()
+            if time_span <= 300:  # 5分钟以内，每30秒一个刻度
+                ax.xaxis.set_major_locator(mdates.SecondLocator(interval=30))
+            elif time_span <= 900:  # 15分钟以内，每1分钟一个刻度
+                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=1))
+            elif time_span <= 3600:  # 1小时以内，每5分钟一个刻度
+                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=5))
+            else:  # 超过1小时，每15分钟一个刻度
+                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
         fig.autofmt_xdate(rotation=45)
         
+        # 优化背景色 - 使用深色主题（类似Grafana）
+        fig.patch.set_facecolor('#1e1e1e')  # 深色背景
+        ax.set_facecolor('#2b2b2b')  # 图表区域深灰色
+        
         # 确保图表紧凑但不会裁剪内容
-        fig.tight_layout(pad=2.0)
+        fig.tight_layout(pad=3.0)
 
         buffer = BytesIO()
         fig.savefig(buffer, format="png")
