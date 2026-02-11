@@ -4,8 +4,10 @@ FastAPI 应用主入口
 import json
 import logging
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI, Request
 
@@ -25,6 +27,62 @@ CONFIG, CHANNELS = load_config()
 setup_logging(**CONFIG["logging"])
 logger = logging.getLogger("alert-router")
 logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
+
+# 进程内 Jenkins 去重缓存（key -> 过期时间戳）
+_JENKINS_DEDUP_CACHE = {}
+
+
+def _build_jenkins_dedup_key(labels: dict) -> Optional[str]:
+    """
+    生成 Jenkins 去重 key。
+    仅在包含 jenkins_job 和 check_commitID 时启用去重。
+    """
+    jenkins_job = labels.get("jenkins_job")
+    commit_id = labels.get("check_commitID")
+    if not jenkins_job or not commit_id:
+        return None
+    alertname = labels.get("alertname", "")
+    git_branch = labels.get("gitBranch", "")
+    return f"{alertname}|{jenkins_job}|{commit_id}|{git_branch}"
+
+
+def _should_skip_jenkins_firing(labels: dict, alert_status: str, config: dict) -> bool:
+    """
+    Jenkins firing 告警去重：
+    - status=firing：在去重窗口内仅首次发送，后续跳过
+    - status=resolved 且 clear_on_resolved=true：清理该 key
+    """
+    dedup_cfg = (config or {}).get("jenkins_dedup", {}) or {}
+    if not dedup_cfg.get("enabled", True):
+        return False
+
+    key = _build_jenkins_dedup_key(labels)
+    if not key:
+        return False
+
+    ttl_seconds = int(dedup_cfg.get("ttl_seconds", 900))
+    clear_on_resolved = bool(dedup_cfg.get("clear_on_resolved", True))
+    now = time.time()
+
+    # 清理过期 key，避免缓存无限增长
+    expired_keys = [k for k, exp in _JENKINS_DEDUP_CACHE.items() if exp <= now]
+    for k in expired_keys:
+        _JENKINS_DEDUP_CACHE.pop(k, None)
+
+    if alert_status == "resolved":
+        if clear_on_resolved:
+            _JENKINS_DEDUP_CACHE.pop(key, None)
+        return False
+
+    if alert_status != "firing":
+        return False
+
+    expires_at = _JENKINS_DEDUP_CACHE.get(key)
+    if expires_at and expires_at > now:
+        return True
+
+    _JENKINS_DEDUP_CACHE[key] = now + max(1, ttl_seconds)
+    return False
 
 
 @asynccontextmanager
@@ -74,6 +132,20 @@ def _handle_webhook(payload: dict) -> dict:
     for a in alerts:
         labels = a.get("labels", {})
         alertname = labels.get("alertname", "Unknown")
+        alert_status = a.get("status", "firing")
+
+        # Jenkins 告警在去重窗口内只发送一次 firing，抑制 Alertmanager 组更新导致的重复通知
+        if _should_skip_jenkins_firing(labels, alert_status, CONFIG):
+            logger.info(f"告警 {alertname} 命中 Jenkins 去重窗口，跳过重复 firing 通知")
+            results.append(
+                {
+                    "alert": alertname,
+                    "skipped": "jenkins 去重窗口内重复 firing",
+                    "alert_status": alert_status,
+                }
+            )
+            continue
+
         targets = route(labels, CONFIG)
         logger.info(f"告警 {alertname} 路由到渠道: {targets}")
 
@@ -87,7 +159,6 @@ def _handle_webhook(payload: dict) -> dict:
             "generatorURL": a.get("generatorURL"),
         }
 
-        alert_status = a.get("status", "firing")
         source = labels.get("_source")
         image_bytes = None
         if source == "prometheus":
