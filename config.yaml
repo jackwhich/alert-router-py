@@ -44,6 +44,12 @@ prometheus_image:
   timeout_seconds: 8
   max_series: 8
 
+# Jenkins 告警去重（避免 Alertmanager 组更新导致同一 commit 短时间重复通知）
+jenkins_dedup:
+  enabled: true
+  ttl_seconds: 900
+  clear_on_resolved: true
+
 defaults:
   title_prefix: "[ALERT]"
   dashboard_fallback: ""
