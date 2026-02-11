@@ -79,6 +79,12 @@ def generate_plot_from_grafana_generator_url(
                 logger.debug(f"从 generatorURL 提取 Grafana URL: {effective_grafana_url}")
         except Exception:
             pass
+    logger.info(
+        "Grafana 图片生成配置: generatorURL=%s, grafana_url=%s, effective_grafana_url=%s",
+        generator_url,
+        grafana_url,
+        effective_grafana_url,
+    )
     
     # 方法2：如果配置了 grafana_url 或从 generatorURL 提取到了，优先使用 Grafana 渲染服务
     if effective_grafana_url:
