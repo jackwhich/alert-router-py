@@ -204,21 +204,17 @@ def _generate_from_grafana_renderer(
     timeout_seconds: int = 8,
 ) -> Optional[bytes]:
     """使用 Grafana 渲染服务生成图片。"""
-    try:
-        # Grafana 渲染 API 格式：/render/d-solo/{dashboard_uid}/{panel_id}?...
-        # 或者使用 /api/render 端点（需要配置渲染服务）
-        
-        # 尝试从 generatorURL 构建渲染 URL
-        parsed = urlparse(generator_url)
-        
-        # 如果 generatorURL 已经是 Grafana 的 alerting 页面，尝试转换为渲染 URL
-        # 这需要根据实际的 Grafana 配置来调整
-        
-        # 简化方案：直接使用 generatorURL 作为渲染目标（如果 Grafana 支持）
-        # 实际使用时可能需要根据 Grafana 版本和配置调整
-        
-        logger.info("Grafana 渲染服务功能待实现，当前跳过")
-        return None
-    except Exception as exc:
-        logger.warning("Grafana 渲染服务出图异常: %s", exc)
-        return None
+    # Grafana 渲染 API 格式：/render/d-solo/{dashboard_uid}/{panel_id}?...
+    # 或者使用 /api/render 端点（需要配置渲染服务）
+    
+    # 尝试从 generatorURL 构建渲染 URL
+    parsed = urlparse(generator_url)
+    
+    # 如果 generatorURL 已经是 Grafana 的 alerting 页面，尝试转换为渲染 URL
+    # 这需要根据实际的 Grafana 配置来调整
+    
+    # 简化方案：直接使用 generatorURL 作为渲染目标（如果 Grafana 支持）
+    # 实际使用时可能需要根据 Grafana 版本和配置调整
+    
+    logger.info("Grafana 渲染服务功能待实现，当前跳过")
+    return None

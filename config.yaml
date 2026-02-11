@@ -23,6 +23,8 @@ prometheus_image:
   enabled: true
   # Prometheus API 地址，例如: http://prometheus:9090，如果为空则从 generatorURL 解析
   prometheus_url: ""
+  # 图片生成是否使用代理（默认 false，因为 Prometheus 通常是内网地址）
+  use_proxy: false
   lookback_minutes: 15
   step: "30s"
   timeout_seconds: 8
@@ -35,6 +37,8 @@ grafana_image:
   grafana_url: ""
   # Prometheus API 地址，例如: http://prometheus:9090（如果 Grafana 使用 Prometheus 数据源，用于提取查询表达式）
   prometheus_url: ""
+  # 图片生成是否使用代理（默认 false，因为 Grafana/Prometheus 通常是内网地址）
+  use_proxy: false
   lookback_minutes: 15
   step: "30s"
   timeout_seconds: 8

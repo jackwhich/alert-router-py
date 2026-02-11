@@ -119,8 +119,12 @@ def _handle_webhook(payload: dict) -> dict:
                     continue
                 image_channels.append(ch)
             if image_enabled and image_channels:
-                # 优先复用目标 Telegram 渠道的代理配置（如果有）
-                plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
+                # 根据配置决定是否使用代理
+                use_proxy = image_cfg.get("use_proxy", False)
+                plot_proxy = None
+                if use_proxy:
+                    # 如果启用代理，从渠道配置获取代理设置
+                    plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
                 prometheus_url = image_cfg.get("prometheus_url") or None
                 image_bytes = generate_plot_from_generator_url(
                     a.get("generatorURL", ""),
@@ -149,8 +153,12 @@ def _handle_webhook(payload: dict) -> dict:
                     continue
                 image_channels.append(ch)
             if image_enabled and image_channels:
-                # 优先复用目标 Telegram 渠道的代理配置（如果有）
-                plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
+                # 根据配置决定是否使用代理
+                use_proxy = image_cfg.get("use_proxy", False)
+                plot_proxy = None
+                if use_proxy:
+                    # 如果启用代理，从渠道配置获取代理设置
+                    plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
                 grafana_url = image_cfg.get("grafana_url") or None
                 prometheus_url = image_cfg.get("prometheus_url") or None
                 image_bytes = generate_plot_from_grafana_generator_url(
