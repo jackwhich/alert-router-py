@@ -11,12 +11,19 @@
 时间: {{ startsAt }}
 
 {% for key, value in labels.items() -%}
-{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source', 'replicas', 'pods'] -%}
+{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source', '_receiver', 'replicas', 'pods', '_pod_values'] -%}
 {{ key }}: {{ value }}
 {% endif %}
 {% endfor %}
 {% if labels.get('pods') -%}
+{% set pod_values = labels.get('_pod_values', {}) %}
+{% if pod_values -%}
+{% for pod in (labels.pods | unique | sort) -%}
+pod: {{ pod }}{% if pod_values.get('pod:' + pod) %} (值: {{ pod_values.get('pod:' + pod) }}){% endif %}
+{% endfor %}
+{%- else -%}
 pod: {{ (labels.pods | unique | sort) | join('\n\t') }}
+{%- endif %}
 {% endif %}
 {% if labels.get('replicas') -%}
 replica: {{ (labels.replicas | unique | sort) | join('\n\t') }}

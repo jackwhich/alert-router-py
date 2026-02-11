@@ -29,8 +29,10 @@ def _build_series_label(metric: Dict[str, str]) -> str:
     if not metric:
         return "series"
     pairs = []
+    # 排除的标签：不需要在图例中显示
+    exclude_keys = {"__name__", "replica", "prometheus", "job", "instance"}
     for k in sorted(metric.keys()):
-        if k == "__name__":
+        if k in exclude_keys:
             continue
         pairs.append(f"{k}={metric[k]}")
     label = ", ".join(pairs) if pairs else metric.get("__name__", "series")
@@ -114,8 +116,8 @@ def generate_plot_from_generator_url(
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
             return None
 
-        # 创建图表，使用更大的尺寸和更高的DPI以获得更好的质量
-        fig, ax = plt.subplots(figsize=(12, 6), dpi=150)
+        # 创建图表 - 使用更大的尺寸
+        fig, ax = plt.subplots(figsize=(14, 7), dpi=150)
         
         # 设置中文字体支持
         import platform
@@ -167,7 +169,8 @@ def generate_plot_from_generator_url(
             label = _build_series_label(series.get("metric") or {})
             # 使用模运算确保颜色索引不越界
             color = colors[idx % len(colors)]
-            ax.plot(xs, ys, linewidth=2.5, label=label, color=color, marker='o', markersize=4, alpha=0.9)
+            # 绘制数据线 - 更粗更明显
+            ax.plot(xs, ys, linewidth=3.0, label=label, color=color, marker='o', markersize=4, alpha=0.95, zorder=5-idx)
             plotted += 1
 
         if plotted == 0:
@@ -175,9 +178,9 @@ def generate_plot_from_generator_url(
             logger.info("Prometheus query_range 结果无法解析为曲线，跳过出图")
             return None
 
-        # 优化图表样式 - 使用实际的 alertname 作为标题（深色主题）
+        # 优化图表样式 - 使用实际的 alertname 作为标题
         chart_title = alertname if alertname else "Prometheus Alert Trend"
-        ax.set_title(chart_title, fontsize=18, fontweight='bold', pad=25, color='#e0e0e0')
+        ax.set_title(chart_title, fontsize=20, fontweight='bold', pad=30, color='#ffffff')
         
         # X轴标签显示告警时间（UTC+8，到秒）
         if alert_time:
@@ -198,7 +201,7 @@ def generate_plot_from_generator_url(
         else:
             xlabel_text = "Time (UTC+8)"
         
-        ax.set_xlabel(xlabel_text, fontsize=13, color='#e0e0e0', fontweight='normal')
+        ax.set_xlabel(xlabel_text, fontsize=14, color='#ffffff', fontweight='normal')
         
         # Y轴不显示标签，保持简洁
         ax.set_ylabel("", fontsize=0)
@@ -212,40 +215,39 @@ def generate_plot_from_generator_url(
             else:
                 return f'{x:.1f}'
         ax.yaxis.set_major_formatter(plt.FuncFormatter(format_y_value))
-        ax.tick_params(axis='y', labelsize=11, colors='#e0e0e0', width=1)
-        ax.tick_params(axis='x', labelsize=10, colors='#e0e0e0', width=1)
+        ax.tick_params(axis='y', labelsize=12, colors='#ffffff', width=1)
+        ax.tick_params(axis='x', labelsize=11, colors='#ffffff', width=1)
         
-        # 改进网格样式 - 更明显的网格线（深色主题）
-        ax.grid(True, linestyle="--", alpha=0.3, linewidth=0.8, color='#666666')
+        # 改进网格样式 - 更明显
+        ax.grid(True, linestyle="--", alpha=0.4, linewidth=1.0, color='#ffffff')
         ax.set_axisbelow(True)
         
-        # 设置坐标轴颜色（深色主题）
+        # 设置坐标轴颜色
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_color('#666666')
-        ax.spines['bottom'].set_color('#666666')
-        ax.spines['left'].set_linewidth(1.5)
-        ax.spines['bottom'].set_linewidth(1.5)
+        ax.spines['left'].set_color('#ffffff')
+        ax.spines['bottom'].set_color('#ffffff')
+        ax.spines['left'].set_linewidth(2)
+        ax.spines['bottom'].set_linewidth(2)
         
-        # 优化图例显示 - 放在右侧（类似Grafana）
+        # 优化图例显示 - 放在右侧
         if plotted > 0:
             legend = ax.legend(
-                loc="center left",  # 放在右侧
-                bbox_to_anchor=(1.02, 0.5),  # 稍微偏移到图表外
-                fontsize=11,  # 字体大小
-                framealpha=0.9,  # 透明度
+                loc="center left",
+                bbox_to_anchor=(1.02, 0.5),
+                fontsize=12,
+                framealpha=0.95,
                 fancybox=True,
                 shadow=False,
-                edgecolor='#666666',
-                facecolor='#2b2b2b',  # 深色背景
-                borderpad=0.8,
-                labelspacing=0.6,
-                handlelength=1.5,
-                handletextpad=0.5
+                edgecolor='#ffffff',
+                facecolor='#1a1a2e',
+                borderpad=1.0,
+                labelspacing=0.8,
+                handlelength=2.0,
+                handletextpad=0.8
             )
-            # 设置图例文字颜色（浅色，适合深色背景）
             for text in legend.get_texts():
-                text.set_color('#e0e0e0')
+                text.set_color('#ffffff')
                 text.set_fontweight('normal')
         
         # 优化时间轴显示 - 只显示时间（时:分:秒），不显示日期
@@ -263,15 +265,41 @@ def generate_plot_from_generator_url(
                 ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
         fig.autofmt_xdate(rotation=45)
         
-        # 优化背景色 - 使用深色主题（类似Grafana）
-        fig.patch.set_facecolor('#1e1e1e')  # 深色背景
-        ax.set_facecolor('#2b2b2b')  # 图表区域深灰色
+        # 优化背景 - 使用现代渐变背景，更有视觉冲击力
+        # 使用深色到浅色的渐变背景
+        fig.patch.set_facecolor('#0a0a0f')  # 深黑色背景
+        
+        # 图表区域使用深色渐变背景
+        ax.set_facecolor('#151520')  # 深灰蓝色
+        
+        # 创建垂直渐变效果（从下到上）
+        import numpy as np
+        y_min, y_max = ax.get_ylim()
+        x_min, x_max = ax.get_xlim()
+        
+        # 创建渐变网格
+        y_vals = np.linspace(y_min, y_max, 100)
+        x_vals = np.linspace(x_min, x_max, 100)
+        X, Y = np.meshgrid(x_vals, y_vals)
+        
+        # 创建渐变（从深到浅）
+        Z = np.linspace(0, 1, len(y_vals)).reshape(-1, 1)
+        Z = np.tile(Z, (1, len(x_vals)))
+        
+        # 使用自定义颜色映射（深蓝到浅蓝）
+        from matplotlib.colors import LinearSegmentedColormap
+        colors_gradient = ['#0a0a0f', '#1a1a2e', '#2a2a3e']
+        n_bins = 256
+        cmap = LinearSegmentedColormap.from_list('custom', colors_gradient, N=n_bins)
+        
+        ax.imshow(Z, extent=[x_min, x_max, y_min, y_max], 
+                  aspect='auto', cmap=cmap, alpha=0.3, zorder=0, origin='lower')
         
         # 确保图表紧凑但不会裁剪内容
-        fig.tight_layout(pad=3.0)
+        fig.tight_layout(pad=3.5)
 
         buffer = BytesIO()
-        fig.savefig(buffer, format="png")
+        fig.savefig(buffer, format='png', dpi=150, facecolor='#0a0a0f', edgecolor='none', bbox_inches='tight')
         plt.close(fig)
         return buffer.getvalue()
     except requests.RequestException as exc:
