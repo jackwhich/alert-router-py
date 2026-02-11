@@ -6,7 +6,7 @@
 import logging
 from typing import Dict, List, Optional
 
-from requests.exceptions import HTTPError
+from requests.exceptions import HTTPError, RequestException
 
 from ..routing.jenkins_dedup import should_skip_jenkins_firing
 from ..routing.routing import route
@@ -147,12 +147,12 @@ class AlertService:
 
         return {
             "title": f"{title_prefix} {alertname}".strip(),
-            "status": alert.get("status"),
+            "status": alert.get("status", "unknown"),
             "labels": labels,
             "annotations": alert.get("annotations", {}),
-            "startsAt": alert.get("startsAt"),
-            "endsAt": alert.get("endsAt"),
-            "generatorURL": alert.get("generatorURL"),
+            "startsAt": alert.get("startsAt", ""),
+            "endsAt": alert.get("endsAt", ""),
+            "generatorURL": alert.get("generatorURL", ""),
         }
     
     def _send_to_channel(
@@ -215,12 +215,21 @@ class AlertService:
                 if use_image:
                     try:
                         send_telegram(channel, body, photo_bytes=image_bytes)
+                        logger.info(f"告警 {alertname} 渠道 {channel_name} 图片发送成功")
                     except Exception as img_err:
                         logger.warning(
                             f"告警 {alertname} 渠道 {channel_name} 图片发送失败，"
                             f"自动回退文本发送: {img_err}"
                         )
-                        send_telegram(channel, body)
+                        try:
+                            send_telegram(channel, body)
+                            logger.info(f"告警 {alertname} 渠道 {channel_name} 文本回退发送成功")
+                        except Exception as fallback_err:
+                            logger.error(
+                                f"告警 {alertname} 渠道 {channel_name} 文本回退发送失败: {fallback_err}",
+                                exc_info=True,
+                            )
+                            raise
                 else:
                     send_telegram(channel, body)
             else:
@@ -232,7 +241,7 @@ class AlertService:
                 "status": "sent",
                 "alert_status": alert_status,
             }
-        except Exception as e:
+        except RequestException as e:
             error_msg = str(e)
             # 404/401/410 为 Webhook URL 配置问题，不打印堆栈
             is_config_error = (
@@ -250,4 +259,11 @@ class AlertService:
                     f"告警 {alertname} 发送到渠道 {channel_name} 失败: {error_msg}",
                     exc_info=True,
                 )
+            return {"alert": alertname, "channel": channel_name, "error": error_msg}
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(
+                f"告警 {alertname} 发送到渠道 {channel_name} 发生未预期错误: {error_msg}",
+                exc_info=True,
+            )
             return {"alert": alertname, "channel": channel_name, "error": error_msg}

@@ -17,6 +17,13 @@ from ..core.models import Channel
 
 logger = get_logger("alert-router")
 
+# 超时配置（秒）
+TIMEOUTS = {
+    "telegram_photo": 15,
+    "telegram_text": 10,
+    "webhook": 10,
+}
+
 # HTTP 连接池配置
 # 使用连接池复用连接，提高性能
 # 注意：在生产环境中，会话会长期复用，通常不需要手动清理
@@ -117,7 +124,7 @@ def send_telegram(
         kwargs = {
             "data": payload,
             "files": {"photo": ("alert.png", photo_bytes, "image/png")},
-            "timeout": 15,
+            "timeout": TIMEOUTS["telegram_photo"],
         }
     else:
         url = f"https://api.telegram.org/bot{ch.bot_token}/sendMessage"
@@ -130,7 +137,7 @@ def send_telegram(
             payload["parse_mode"] = parse_mode
         kwargs = {
             "json": payload,
-            "timeout": 10,
+            "timeout": TIMEOUTS["telegram_text"],
         }
 
     # 使用连接池会话
@@ -160,37 +167,23 @@ def send_webhook(ch: Channel, body: str):
     Returns:
         requests.Response: HTTP 响应对象
     """
-    kwargs = {"timeout": 10}
+    kwargs = {"timeout": TIMEOUTS["webhook"]}
+    body = body or ""
     
     # 使用连接池会话
     session = _get_session(proxy=ch.proxy)
     
     try:
+        _log_webhook_request(ch.name, ch.webhook_url, body)
         # 尝试作为 JSON 发送
-        logger.info(f"发送 Webhook 消息到渠道 [{ch.name}]，URL: {ch.webhook_url}")
-        logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
         json_body = json.loads(body)
-        response = session.post(ch.webhook_url, json=json_body, **kwargs)
-        response.raise_for_status()
-        logger.info(f"Webhook 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
-        try:
-            logger.debug(f"Webhook 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
-        except (json.JSONDecodeError, ValueError):
-            logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
+        response = _post_webhook(session, ch.webhook_url, ch.name, json=json_body, **kwargs)
         return response
     except (json.JSONDecodeError, ValueError):
         # 如果不是有效的 JSON，则作为原始数据发送
         logger.debug(f"Webhook body 非 JSON，以原始数据发送 (渠道: {ch.name})")
-        logger.info(f"发送 Webhook 消息到渠道 [{ch.name}]，URL: {ch.webhook_url}")
-        logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
         try:
-            response = session.post(ch.webhook_url, data=body, **kwargs)
-            response.raise_for_status()
-            logger.info(f"Webhook 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
-            try:
-                logger.debug(f"Webhook 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
-            except (json.JSONDecodeError, ValueError):
-                logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
+            response = _post_webhook(session, ch.webhook_url, ch.name, data=body, **kwargs)
             return response
         except requests.exceptions.RequestException as e:
             _log_webhook_error(ch.name, e)
@@ -198,6 +191,27 @@ def send_webhook(ch: Channel, body: str):
     except requests.exceptions.RequestException as e:
         _log_webhook_error(ch.name, e)
         raise
+
+
+def _log_webhook_request(channel_name: str, url: str, body: str):
+    logger.info(f"发送 Webhook 消息到渠道 [{channel_name}]，URL: {url}")
+    logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
+
+
+def _post_webhook(
+    session: requests.Session,
+    url: str,
+    channel_name: str,
+    **kwargs,
+):
+    response = session.post(url, **kwargs)
+    response.raise_for_status()
+    logger.info(f"Webhook 消息发送成功 (渠道: {channel_name})，响应状态码: {response.status_code}")
+    try:
+        logger.debug(f"Webhook 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+    except (json.JSONDecodeError, ValueError):
+        logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
+    return response
 
 
 def _log_webhook_error(channel_name: str, e: requests.exceptions.RequestException):

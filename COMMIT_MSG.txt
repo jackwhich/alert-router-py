@@ -1,0 +1,21 @@
+完善路由与发送逻辑，输出完整 labels
+
+本次提交包含以下调整：
+
+## 路由性能与默认规则
+- routing.py: 增加正则缓存，避免重复编译
+- routing.py: 默认规则只取首个并提示多余默认规则
+- routing.py: 未匹配且无默认规则时给出告警日志
+
+## Webhook 发送与超时
+- senders.py: 抽取统一的 Webhook 发送与日志逻辑
+- senders.py: 增加超时常量配置，避免硬编码
+- senders.py: body 为空时安全处理
+
+## 发送回退与异常分类
+- alert_service.py: 图片发送失败后记录回退结果
+- alert_service.py: 请求异常与未预期异常分离处理
+- alert_service.py: 模板上下文字段补默认值
+
+## 模板展示
+- prometheus_telegram.html.j2: 直接输出 labels 全量键值
