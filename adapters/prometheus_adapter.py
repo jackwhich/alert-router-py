@@ -31,7 +31,7 @@ def detect(payload: Dict[str, Any]) -> bool:
 def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     解析并转换 Prometheus Alertmanager webhook payload 为标准格式
-    
+
     Prometheus Alertmanager 格式示例:
     {
         "version": "4",
@@ -58,10 +58,16 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not isinstance(raw_alerts, list):
         return []
 
-    # 同组多条告警合并为一条发送；从各条告警汇总 replicas（与原始多副本一致），不注入 replica_count
-    if len(raw_alerts) > 1 and payload.get("groupKey") and payload.get("commonLabels"):
-        common_labels: Dict[str, Any] = dict(payload.get("commonLabels") or {})
-        common_labels["_source"] = "prometheus"
+    # 同组多条告警合并为一条发送；从各条告警汇总 replicas 与 pods，与原始多副本/多 pod 一致
+    if len(raw_alerts) > 1 and payload.get("groupKey"):
+        first_lbl = (raw_alerts[0].get("labels") or {})
+        # 共同 label：仅保留在所有条中取值相同的键（pod/replica 用下面的列表）
+        common_labels: Dict[str, Any] = {}
+        for k, v in first_lbl.items():
+            if k in ("replica", "pod"):
+                continue
+            if all((a.get("labels") or {}).get(k) == v for a in raw_alerts):
+                common_labels[k] = v
         replicas = []
         pods = []
         for a in raw_alerts:
@@ -70,13 +76,13 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 replicas.append(lbl["replica"])
             if "pod" in lbl:
                 pods.append(lbl["pod"])
+        common_labels["_source"] = "prometheus"
         if replicas:
             common_labels["replicas"] = replicas
         if pods:
             common_labels["pods"] = pods
         common_annotations: Dict[str, Any] = dict(payload.get("commonAnnotations") or {})
         first = raw_alerts[0]
-        # 合并时 commonAnnotations 可能不含 summary，直接取第一条告警的 summary（与 old webhook-telegram 一致）
         first_ann = first.get("annotations") or {}
         if not common_annotations.get("summary") and first_ann.get("summary"):
             common_annotations["summary"] = first_ann["summary"]
@@ -94,9 +100,7 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     for alert in raw_alerts:
         labels: Dict[str, Any] = dict(alert.get("labels") or {})
         labels["_source"] = "prometheus"
-
         annotations: Dict[str, Any] = dict(alert.get("annotations") or {})
-
         alerts.append(
             build_alert_object(
                 alert=alert,
