@@ -1,14 +1,7 @@
-保持 labels 原始数据，仅在告警对象保存来源
+修复模板换行被吞掉的问题
 
 本次提交包含以下调整：
 
-## 保持 labels 原始
-- prometheus_adapter/grafana_adapter: 不再写入 _source/_receiver 到 labels
-- alert_normalizer: 单条告警仅在告警对象保存 _source
-
-## 路由与图片生成
-- alert_service: 路由匹配临时附带 _source/_receiver，不污染 labels
-- alert_service: 图片生成使用告警对象的 _source
-
-## 模板展示
-- grafana_telegram.html.j2: labels 列表类型支持 join 输出
+## 模板输出
+- prometheus_telegram.html.j2: 去掉空白裁剪，确保 labels 每行展示
+- grafana_telegram.html.j2: 去掉空白裁剪，确保 labels 每行展示
