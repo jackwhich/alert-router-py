@@ -25,3 +25,6 @@ replica: {{ (labels.replicas | unique | sort) | join('\n\t') }}
 {% if annotations.summary -%}
 summary: {{ annotations.summary }}
 {%- endif %}
+{% if generatorURL -%}
+图表: {{ generatorURL }}
+{%- endif %}

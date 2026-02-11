@@ -36,6 +36,14 @@ proxy:
 # false: 禁用代理（所有渠道都不使用代理）
 proxy_enabled: true
 
+# Prometheus 告警图片渲染（方案 C：直接 query_range 出图，不依赖 Grafana Panel）
+prometheus_image:
+  enabled: true
+  lookback_minutes: 15
+  step: "30s"
+  timeout_seconds: 8
+  max_series: 8
+
 defaults:
   title_prefix: "[ALERT]"
   dashboard_fallback: ""
@@ -100,13 +108,21 @@ channels:
 
 # 路由：所有告警发默认渠道；severity=critical/灾难 时额外发灾难渠道（共 2 个渠道）
 routing:
+  # Jenkins 告警（Prometheus 来源）走专用模板/群组
+  - match:
+      _source: "prometheus"
+      jenkins_job: ".*"
+    send_to: ["prometheus_telegram_jenkins"]
+
   # 告警来源 = Prometheus（支持 critical 或 灾难）
   - match:
       _source: "prometheus"
+      alertname: "^(?!Jenkins|jenkins).*"
       severity: "critical|灾难"
     send_to: ["prometheus_telegram_critical"]
   - match:
       _source: "prometheus"
+      alertname: "^(?!Jenkins|jenkins).*"
     send_to: ["prometheus_telegram_default", "prometheus_slack"]
 
   # 告警来源 = Grafana（支持 critical 或 灾难）
@@ -118,11 +134,8 @@ routing:
       _source: "grafana"
     send_to: ["grafana_telegram_default"]
 
-  # 其他（如 Jenkins）
-  - match:
-      jenkins_job: ".*"
-    send_to: ["prometheus_telegram_jenkins"]
-
   # 兜底：未匹配的告警发到 Prometheus 默认 Telegram
   - default: true
     send_to: ["prometheus_telegram_default"]
+
+
