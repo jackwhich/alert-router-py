@@ -60,6 +60,7 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     # 同组多条告警合并为一条发送；从各条告警汇总 replicas 与 pods，与原始多副本/多 pod 一致
     if len(raw_alerts) > 1 and payload.get("groupKey"):
+        receiver_name = payload.get("receiver")
         first_lbl = (raw_alerts[0].get("labels") or {})
         # 共同 label：仅保留在所有条中取值相同的键（pod/replica 用下面的列表）
         common_labels: Dict[str, Any] = {}
@@ -77,6 +78,8 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             if "pod" in lbl:
                 pods.append(lbl["pod"])
         common_labels["_source"] = "prometheus"
+        if receiver_name:
+            common_labels["_receiver"] = receiver_name
         if replicas:
             common_labels["replicas"] = replicas
         if pods:
@@ -97,9 +100,12 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         return [merged]
 
     alerts: List[Dict[str, Any]] = []
+    receiver_name = payload.get("receiver")
     for alert in raw_alerts:
         labels: Dict[str, Any] = dict(alert.get("labels") or {})
         labels["_source"] = "prometheus"
+        if receiver_name:
+            labels["_receiver"] = receiver_name
         annotations: Dict[str, Any] = dict(alert.get("annotations") or {})
         alerts.append(
             build_alert_object(
