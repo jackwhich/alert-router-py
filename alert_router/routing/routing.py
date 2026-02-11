@@ -10,6 +10,7 @@ logger = get_logger("alert-router")
 
 # 正则缓存，避免重复编译
 _REGEX_CACHE: Dict[str, re.Pattern] = {}
+_DEFAULT_RULE_WARNED = False
 
 
 def _regex_search(pattern: str, text: str) -> bool:
@@ -118,7 +119,10 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
             if default_channels is None:
                 default_channels = r["send_to"]
             else:
-                logger.warning("发现多个 default 规则，仅使用第一个默认规则")
+                global _DEFAULT_RULE_WARNED
+                if not _DEFAULT_RULE_WARNED:
+                    logger.warning("发现多个 default 规则，仅使用第一个默认规则")
+                    _DEFAULT_RULE_WARNED = True
     
     # 默认渠道：仅当「完全没匹配到任何规则」时使用（兜底）
     # 有匹配的规则时，不再叠加 default，由各 match 规则自行包含「默认渠道」
