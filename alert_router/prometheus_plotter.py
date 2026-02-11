@@ -39,41 +39,6 @@ def _build_series_label(metric: Dict[str, str]) -> str:
     return label
 
 
-def _infer_yaxis_label(alertname: Optional[str], result: list) -> str:
-    """根据告警名称和数据特征推断更专业的Y轴标签。"""
-    if not alertname:
-        return "Metric Value"
-    
-    alertname_lower = alertname.lower()
-    
-    # 根据告警名称关键词推断
-    if any(keyword in alertname_lower for keyword in ['count', '次数', '数量', '个', '次']):
-        return "Count"
-    elif any(keyword in alertname_lower for keyword in ['rate', '速率', '速度', 'qps', 'rps', 'tps']):
-        return "Rate"
-    elif any(keyword in alertname_lower for keyword in ['percent', '百分比', '%', 'percentile']):
-        return "Percentage (%)"
-    elif any(keyword in alertname_lower for keyword in ['latency', '延迟', 'time', 'duration', '耗时']):
-        return "Latency (ms)"
-    elif any(keyword in alertname_lower for keyword in ['memory', '内存', 'mem']):
-        return "Memory (MB)"
-    elif any(keyword in alertname_lower for keyword in ['cpu', 'cpu使用率']):
-        return "CPU Usage (%)"
-    elif any(keyword in alertname_lower for keyword in ['disk', '磁盘', 'storage']):
-        return "Disk Usage (%)"
-    elif any(keyword in alertname_lower for keyword in ['error', '错误', '失败', 'fail']):
-        return "Error Count"
-    elif any(keyword in alertname_lower for keyword in ['request', '请求', 'req']):
-        return "Request Count"
-    elif any(keyword in alertname_lower for keyword in ['status', '状态码', 'status code']):
-        return "Status Code Count"
-    elif any(keyword in alertname_lower for keyword in ['throughput', '吞吐量', 'throughput']):
-        return "Throughput"
-    
-    # 如果无法推断，使用通用的专业术语
-    return "Metric Value"
-
-
 def generate_plot_from_generator_url(
     generator_url: str,
     *,
