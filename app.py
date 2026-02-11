@@ -17,6 +17,7 @@ from alert_router.routing import route
 from requests.exceptions import HTTPError
 from alert_router.senders import send_telegram, send_webhook
 from alert_router.prometheus_plotter import generate_plot_from_generator_url
+from alert_router.grafana_plotter import generate_plot_from_grafana_generator_url
 from alert_router.template_renderer import render
 
 # 加载配置（config 只读配置，不初始化日志）
@@ -123,6 +124,38 @@ def _handle_webhook(payload: dict) -> dict:
                 prometheus_url = image_cfg.get("prometheus_url") or None
                 image_bytes = generate_plot_from_generator_url(
                     a.get("generatorURL", ""),
+                    prometheus_url=prometheus_url,
+                    proxies=plot_proxy,
+                    lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
+                    step=str(image_cfg.get("step", "30s")),
+                    timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
+                    max_series=int(image_cfg.get("max_series", 8)),
+                )
+                if image_bytes:
+                    logger.info(f"告警 {alertname} 已生成趋势图，将优先按图片发送 Telegram")
+                else:
+                    logger.info(f"告警 {alertname} 未生成趋势图，将按文本发送 Telegram")
+        elif source == "grafana":
+            image_cfg = CONFIG.get("grafana_image", {}) or {}
+            image_enabled = image_cfg.get("enabled", True)
+            image_channels = []
+            for t in targets:
+                ch = CHANNELS.get(t)
+                if not ch or ch.type != "telegram" or not ch.enabled:
+                    continue
+                if alert_status == "resolved" and not ch.send_resolved:
+                    continue
+                if not ch.image_enabled:
+                    continue
+                image_channels.append(ch)
+            if image_enabled and image_channels:
+                # 优先复用目标 Telegram 渠道的代理配置（如果有）
+                plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
+                grafana_url = image_cfg.get("grafana_url") or None
+                prometheus_url = image_cfg.get("prometheus_url") or None
+                image_bytes = generate_plot_from_grafana_generator_url(
+                    a.get("generatorURL", ""),
+                    grafana_url=grafana_url,
                     prometheus_url=prometheus_url,
                     proxies=plot_proxy,
                     lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
