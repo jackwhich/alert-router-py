@@ -59,6 +59,7 @@ channels:
   prometheus_telegram_default:
     type: telegram
     enabled: true
+    image_enabled: true   # 该渠道启用 Prometheus 趋势图（仅 Telegram 生效）
     bot_token: "8502571186:xxxx"
     chat_id: "-5134533386"
     template: "prometheus_telegram.html.j2"
@@ -66,6 +67,7 @@ channels:
   prometheus_telegram_critical:
     type: telegram
     enabled: true
+    image_enabled: true
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567890"
     template: "prometheus_telegram.html.j2"
@@ -101,6 +103,7 @@ channels:
   prometheus_telegram_jenkins:
     type: telegram
     enabled: true
+    image_enabled: false  # Jenkins 渠道关闭趋势图
     bot_token: "123456:AAxxxx"
     chat_id: "-1001234567894"  # Jenkins 告警群组
     template: "prometheus_telegram_jenkins.html.j2"
@@ -133,9 +136,4 @@ routing:
   - match:
       _source: "grafana"
     send_to: ["grafana_telegram_default"]
-
-  # 兜底：未匹配的告警发到 Prometheus 默认 Telegram
-  - default: true
-    send_to: ["prometheus_telegram_default"]
-
 

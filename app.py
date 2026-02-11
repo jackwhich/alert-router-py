@@ -93,11 +93,19 @@ def _handle_webhook(payload: dict) -> dict:
         if source == "prometheus":
             image_cfg = CONFIG.get("prometheus_image", {}) or {}
             image_enabled = image_cfg.get("enabled", True)
-            telegram_channels = [CHANNELS[t] for t in targets if CHANNELS.get(t) and CHANNELS[t].type == "telegram"]
-            has_telegram_target = bool(telegram_channels)
-            if image_enabled and has_telegram_target:
+            image_channels = []
+            for t in targets:
+                ch = CHANNELS.get(t)
+                if not ch or ch.type != "telegram" or not ch.enabled:
+                    continue
+                if alert_status == "resolved" and not ch.send_resolved:
+                    continue
+                if not ch.image_enabled:
+                    continue
+                image_channels.append(ch)
+            if image_enabled and image_channels:
                 # 优先复用目标 Telegram 渠道的代理配置（如果有）
-                plot_proxy = next((c.proxy for c in telegram_channels if c.proxy), None)
+                plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
                 image_bytes = generate_plot_from_generator_url(
                     a.get("generatorURL", ""),
                     proxies=plot_proxy,
@@ -131,8 +139,9 @@ def _handle_webhook(payload: dict) -> dict:
                 body = render(ch.template, ctx)
                 logger.info(f"发送到渠道 [{t}] 的内容:\n{body}")
                 if ch.type == "telegram":
-                    # Prometheus 告警优先图片发送；失败时自动回退文本，避免漏告警
-                    if image_bytes:
+                    # Prometheus 告警仅对 image_enabled=true 的 Telegram 渠道发送图片
+                    use_image = source == "prometheus" and ch.image_enabled and bool(image_bytes)
+                    if use_image:
                         try:
                             send_telegram(ch, body, photo_bytes=image_bytes)
                         except Exception as img_err:
