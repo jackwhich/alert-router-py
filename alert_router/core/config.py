@@ -59,6 +59,10 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
         raw = {}
     _validate_logging_config(raw)
     
+    # 检查 channels 配置是否存在
+    if "channels" not in raw or not isinstance(raw["channels"], dict):
+        raise ValueError("config.yaml 中必须配置 channels 节点")
+    
     channels = {}
     # 获取全局代理配置和开关
     global_proxy = raw.get("proxy", None)
@@ -80,9 +84,10 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
                 "https": _normalize_proxy_url(proxy),
             }
         elif isinstance(proxy, dict):
+            # 使用不同的变量名避免与外层循环的 k, v 冲突
             proxy = {
-                k: _normalize_proxy_url(str(v)) if isinstance(v, str) else v
-                for k, v in proxy.items()
+                proxy_key: _normalize_proxy_url(str(proxy_val)) if isinstance(proxy_val, str) else proxy_val
+                for proxy_key, proxy_val in proxy.items()
             }
         elif proxy is False or proxy == "none":
             proxy = None

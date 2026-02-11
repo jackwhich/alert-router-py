@@ -4,7 +4,7 @@
 import re
 from typing import Dict, List
 
-from .logging_config import get_logger
+from ..core.logging_config import get_logger
 
 logger = get_logger("alert-router")
 
@@ -90,8 +90,14 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
     channels = set()
     default_channels = []
     
+    # 获取路由规则列表，如果不存在则返回空列表
+    routing_rules = config.get("routing", [])
+    if not routing_rules:
+        logger.warning("配置中未找到 routing 规则，返回空渠道列表")
+        return []
+    
     # 先收集所有匹配的规则和默认规则
-    for r in config["routing"]:
+    for r in routing_rules:
         if "match" in r and match(labels, r["match"]):
             # 匹配的规则：添加到渠道集合
             channels.update(r["send_to"])

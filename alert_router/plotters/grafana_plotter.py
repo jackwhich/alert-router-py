@@ -17,7 +17,7 @@ import matplotlib
 import matplotlib.dates as mdates
 import requests
 
-from .logging_config import get_logger
+from ..core.logging_config import get_logger
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402

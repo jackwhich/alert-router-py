@@ -120,4 +120,50 @@
 | **title** | 无 | 有（如 `[FIRING:1] ...`） |
 | **groupKey + alerts** | 有 | 也有（不能单靠这个区分） |
 
-代码里在 `adapters/alert_normalizer.py` 的 `identify_data_source(payload)` 中按上表规则做**数据源识别**，解析后由各 adapter 写入 `_source: "prometheus"` 或 `_source: "grafana"`，路由再根据 `_source` 等标签选择渠道。
+代码里在 `alert_router/adapters/alert_normalizer.py` 的 `identify_data_source(payload)` 中按上表规则做**数据源识别**，解析后由各 adapter 写入 `_source: "prometheus"` 或 `_source: "grafana"`，路由再根据 `_source` 等标签选择渠道。
+
+## 4. 数据源识别流程
+
+```
+Webhook 请求
+    ↓
+alert_normalizer.identify_data_source()
+    ↓
+    ├─ 有 orgId? → Grafana Unified Alerting
+    ├─ version == "1" 且 (有 state 或 title)? → Grafana Unified Alerting
+    ├─ version != "1" 且 有 groupKey + alerts? → Prometheus Alertmanager
+    └─ 其他 → 单条告警格式或未知格式
+    ↓
+调用对应的 adapter.parse()
+    ↓
+写入 _source 标签
+    ↓
+路由模块根据 _source 等标签分发
+```
+
+## 5. 适配器模块说明
+
+### Prometheus Adapter (`alert_router/adapters/prometheus_adapter.py`)
+
+- **功能**: 解析 Prometheus Alertmanager webhook payload
+- **特性**:
+  - 支持告警合并（同组多条告警合并为一条）
+  - 提取实体值（pod、instance、service_name 等）
+  - 支持多实体类型汇总
+- **输出**: 标准告警格式，包含 `_source: "prometheus"` 标签
+
+### Grafana Adapter (`alert_router/adapters/grafana_adapter.py`)
+
+- **功能**: 解析 Grafana Unified Alerting webhook payload
+- **特性**:
+  - 提取当前值（从 `values.B` 或 `valueString`）
+  - 保留 Grafana 特有字段（fingerprint、silenceURL 等）
+- **输出**: 标准告警格式，包含 `_source: "grafana"` 标签
+
+### Alert Normalizer (`alert_router/adapters/alert_normalizer.py`)
+
+- **功能**: 统一解析入口，自动识别数据源并调用对应适配器
+- **流程**:
+  1. 识别数据源类型
+  2. 调用对应的 adapter.parse()
+  3. 返回标准化的告警列表

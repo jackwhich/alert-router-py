@@ -3,6 +3,10 @@ Prometheus 趋势图生成模块
 
 基于 Alertmanager webhook 中的 generatorURL（g0.expr）调用 Prometheus query_range，
 生成 PNG 趋势图，供 Telegram sendPhoto 使用。
+
+支持两种绘图引擎：
+1. Plotly（推荐）- 更美观的图表，支持渐变、阴影等现代视觉效果
+2. Matplotlib（备选）- 传统绘图库，兼容性好
 """
 from __future__ import annotations
 
@@ -16,12 +20,21 @@ import matplotlib
 import matplotlib.dates as mdates
 import requests
 
-from .logging_config import get_logger
+from ..core.logging_config import get_logger
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 logger = get_logger("alert-router")
+
+# 尝试导入 Plotly（可选，如果未安装则使用 matplotlib）
+try:
+    import plotly.graph_objects as go
+    import plotly.io as pio
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    logger.info("Plotly 未安装，将使用 matplotlib 生成图表。要使用更美观的图表，请安装: pip install plotly kaleido")
 
 
 def _build_series_label(metric: Dict[str, str]) -> str:
@@ -41,6 +54,196 @@ def _build_series_label(metric: Dict[str, str]) -> str:
     return label
 
 
+def _generate_plot_with_plotly(
+    result: list,
+    alertname: Optional[str] = None,
+    alert_time: Optional[str] = None,
+) -> Optional[bytes]:
+    """
+    使用 Plotly 生成美观的图表（推荐）
+    
+    优势：
+    - 更现代的视觉效果（渐变、阴影、平滑曲线）
+    - 更好的颜色方案和样式
+    - 更清晰的图例和标签
+    """
+    if not PLOTLY_AVAILABLE:
+        return None
+    
+    try:
+        fig = go.Figure()
+        
+        # 使用更美观的颜色方案（现代渐变色）
+        colors = [
+            '#FF6B6B',  # 珊瑚红
+            '#4ECDC4',  # 青绿色
+            '#45B7D1',  # 天蓝色
+            '#FFA07A',  # 浅橙红
+            '#98D8C8',  # 薄荷绿
+            '#F7DC6F',  # 金黄色
+            '#BB8FCE',  # 淡紫色
+            '#85C1E2',  # 浅蓝色
+        ]
+        
+        plotted = 0
+        for idx, series in enumerate(result):
+            values = series.get("values") or []
+            if not values:
+                continue
+            
+            xs = []
+            ys = []
+            for item in values:
+                if not isinstance(item, (list, tuple)) or len(item) < 2:
+                    continue
+                try:
+                    ts = float(item[0])
+                    val = float(item[1])
+                except (TypeError, ValueError):
+                    continue
+                # 将 UTC 时间转换为 UTC+8
+                utc_time = datetime.fromtimestamp(ts, tz=timezone.utc)
+                utc8_time = utc_time.astimezone(ZoneInfo("Asia/Shanghai"))
+                xs.append(utc8_time)
+                ys.append(val)
+            
+            if not xs:
+                continue
+            
+            # 确保数据点按时间排序
+            sorted_pairs = sorted(zip(xs, ys), key=lambda x: x[0])
+            xs, ys = zip(*sorted_pairs) if sorted_pairs else ([], [])
+            
+            if not xs:
+                continue
+            
+            label = _build_series_label(series.get("metric") or {})
+            color = colors[idx % len(colors)]
+            
+            # 将十六进制颜色转换为 rgba 格式（用于填充）
+            def hex_to_rgba(hex_color, alpha=0.2):
+                hex_color = hex_color.lstrip('#')
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                return f'rgba({r}, {g}, {b}, {alpha})'
+            
+            # 添加填充区域（渐变效果）
+            fig.add_trace(go.Scatter(
+                x=list(xs),
+                y=list(ys),
+                mode='lines+markers',
+                name=label,
+                line=dict(
+                    color=color,
+                    width=3,
+                    shape='spline',  # 平滑曲线
+                ),
+                marker=dict(
+                    size=6,
+                    color=color,
+                    line=dict(width=1, color='white'),
+                ),
+                fill='tonexty' if idx > 0 else 'tozeroy',
+                fillcolor=hex_to_rgba(color, 0.2),
+                hovertemplate=f'<b>{label}</b><br>时间: %{{x}}<br>值: %{{y}}<extra></extra>',
+            ))
+            plotted += 1
+        
+        if plotted == 0:
+            return None
+        
+        # 设置标题
+        chart_title = alertname if alertname else "Prometheus Alert Trend"
+        
+        # X轴标签
+        if alert_time:
+            try:
+                from dateutil import parser
+                alert_dt = parser.parse(alert_time)
+                if alert_dt.tzinfo is None:
+                    alert_dt = alert_dt.replace(tzinfo=timezone.utc)
+                alert_dt_utc8 = alert_dt.astimezone(ZoneInfo("Asia/Shanghai"))
+                xlabel_text = alert_dt_utc8.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                xlabel_text = "Time (UTC+8)"
+        else:
+            xlabel_text = "Time (UTC+8)"
+        
+        # 更新布局 - 使用深色主题，更现代
+        fig.update_layout(
+            title=dict(
+                text=chart_title,
+                font=dict(size=24, color='#ffffff', family='Arial, sans-serif'),
+                x=0.5,
+                xanchor='center',
+            ),
+            xaxis=dict(
+                title=dict(text=xlabel_text, font=dict(size=14, color='#ffffff')),
+                tickfont=dict(size=11, color='#ffffff'),
+                gridcolor='rgba(255, 255, 255, 0.2)',
+                gridwidth=1,
+                showgrid=True,
+                zeroline=False,
+            ),
+            yaxis=dict(
+                title="",
+                tickfont=dict(size=12, color='#ffffff'),
+                gridcolor='rgba(255, 255, 255, 0.2)',
+                gridwidth=1,
+                showgrid=True,
+                zeroline=False,
+            ),
+            plot_bgcolor='#0a0a0f',
+            paper_bgcolor='#0a0a0f',
+            font=dict(family='Arial, sans-serif'),
+            legend=dict(
+                bgcolor='rgba(26, 26, 46, 0.95)',
+                bordercolor='rgba(255, 255, 255, 0.3)',
+                borderwidth=1,
+                font=dict(size=12, color='#ffffff'),
+                x=1.02,
+                y=0.5,
+                xanchor='left',
+                yanchor='middle',
+            ),
+            margin=dict(l=60, r=200, t=80, b=60),
+            width=1400,
+            height=700,
+            hovermode='x unified',
+        )
+        
+        # 导出为 PNG
+        buffer = BytesIO()
+        try:
+            # 使用 write_image 方法（更可靠）
+            import tempfile
+            import os
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                tmp_path = tmp_file.name
+            try:
+                fig.write_image(tmp_path, width=1400, height=700, scale=2)
+                with open(tmp_path, 'rb') as f:
+                    img_bytes = f.read()
+                buffer.write(img_bytes)
+                os.unlink(tmp_path)  # 删除临时文件
+            except Exception as e:
+                # 如果 write_image 失败，尝试 to_image
+                logger.debug(f"write_image 失败，尝试 to_image: {e}")
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                img_bytes = pio.to_image(fig, format='png', width=1400, height=700, scale=2)
+                buffer.write(img_bytes)
+        except Exception as e:
+            logger.warning(f"Plotly 图片导出失败: {e}")
+            raise
+        return buffer.getvalue()
+        
+    except Exception as exc:
+        logger.warning("Plotly 出图异常，回退到 matplotlib: %s", exc)
+        return None
+
+
 def generate_plot_from_generator_url(
     generator_url: str,
     *,
@@ -52,6 +255,7 @@ def generate_plot_from_generator_url(
     max_series: int = 8,
     alertname: Optional[str] = None,
     alert_time: Optional[str] = None,
+    use_plotly: bool = True,  # 默认使用 Plotly
 ) -> Optional[bytes]:
     """
     根据 generatorURL 生成 Prometheus 趋势图。
@@ -116,6 +320,14 @@ def generate_plot_from_generator_url(
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
             return None
 
+        # 优先使用 Plotly 生成更美观的图表
+        if use_plotly and PLOTLY_AVAILABLE:
+            plotly_result = _generate_plot_with_plotly(result, alertname, alert_time)
+            if plotly_result:
+                return plotly_result
+            logger.info("Plotly 出图失败，回退到 matplotlib")
+
+        # 使用 Matplotlib 生成图表（备选方案）
         # 创建图表 - 使用更大的尺寸
         fig, ax = plt.subplots(figsize=(14, 7), dpi=150)
         
