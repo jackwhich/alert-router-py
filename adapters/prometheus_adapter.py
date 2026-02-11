@@ -30,24 +30,60 @@ def _extract_value_from_summary(summary: str) -> str:
     return ""
 
 
-def _build_pod_values(raw_alerts: List[Dict[str, Any]]) -> Dict[str, str]:
+def _build_entity_values(raw_alerts: List[Dict[str, Any]]) -> Dict[str, str]:
     """
-    构建 pod 到值的映射
-    返回格式: {"pod-name": "32.96%"}
-    注意：同一个 pod 可能出现在多个告警中，取第一个值
+    构建实体到值的映射，支持多种告警类型
+    返回格式: {"pod:pod-name": "32.96%", "instance:10.8.64.72:9100": "50%", "service_name:my-service": "10%"}
+    
+    支持的实体类型（按优先级）：
+    - pod: Kubernetes Pod
+    - instance: 节点实例（Node Exporter, Nginx等）
+    - service_name: RPC服务名
+    - consumergroup/topic: Kafka消费组和主题
+    - jenkins_job: Jenkins任务
+    - device: 设备名（磁盘等）
+    - container: 容器名
+    
+    注意：同一个实体可能出现在多个告警中，取第一个值
     """
-    pod_values: Dict[str, str] = {}
+    entity_values: Dict[str, str] = {}
+    
+    # 定义实体标签的优先级顺序（按常见程度）
+    entity_labels = [
+        "pod",           # Kubernetes Pod
+        "instance",      # Node Exporter, Nginx等节点实例
+        "service_name",  # RPC服务名
+        "consumergroup", # Kafka消费组
+        "topic",         # Kafka主题
+        "jenkins_job",   # Jenkins任务
+        "device",        # 设备名（磁盘等）
+        "container",     # 容器名
+        "namespace",     # 命名空间
+        "name",          # 通用名称（Kafka等）
+    ]
+    
     for alert in raw_alerts:
         labels = alert.get("labels") or {}
         annotations = alert.get("annotations") or {}
         
-        # 提取 pod
-        pod = labels.get("pod")
-        if not pod:
+        # 按优先级查找实体标签
+        entity_key = None
+        entity_value = None
+        
+        for label_key in entity_labels:
+            if label_key in labels:
+                entity_key = label_key
+                entity_value = labels[label_key]
+                break
+        
+        if not entity_key or not entity_value:
             continue
         
-        # 如果这个 pod 已经有值了，跳过（避免覆盖）
-        if f"pod:{pod}" in pod_values:
+        # 构建唯一键
+        unique_key = f"{entity_key}:{entity_value}"
+        
+        # 如果这个实体已经有值了，跳过（避免覆盖）
+        if unique_key in entity_values:
             continue
         
         # 从 summary 中提取值
@@ -59,11 +95,11 @@ def _build_pod_values(raw_alerts: List[Dict[str, Any]]) -> Dict[str, str]:
             description = annotations.get("description", "")
             value = _extract_value_from_summary(description)
         
-        # 存储 pod 的值
+        # 存储实体的值
         if value:
-            pod_values[f"pod:{pod}"] = value
+            entity_values[unique_key] = value
     
-    return pod_values
+    return entity_values
 
 
 def detect(payload: Dict[str, Any]) -> bool:
@@ -112,37 +148,70 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not isinstance(raw_alerts, list):
         return []
 
-    # 同组多条告警合并为一条发送；从各条告警汇总 replicas 与 pods，与原始多副本/多 pod 一致
+    # 同组多条告警合并为一条发送；从各条告警汇总各种实体类型（pod、instance、service_name等）
     if len(raw_alerts) > 1 and payload.get("groupKey"):
         receiver_name = payload.get("receiver")
         first_lbl = (raw_alerts[0].get("labels") or {})
-        # 共同 label：仅保留在所有条中取值相同的键（pod/replica 用下面的列表）
+        
+        # 定义需要单独收集的标签（这些标签在不同告警中可能有不同值）
+        # 这些标签会被收集到列表中，而不是作为共同标签
+        collectable_labels = [
+            "replica",        # Kubernetes副本
+            "pod",            # Kubernetes Pod
+            "instance",       # 节点实例（Node Exporter, Nginx等）
+            "service_name",   # RPC服务名
+            "consumergroup",  # Kafka消费组
+            "topic",          # Kafka主题
+            "jenkins_job",    # Jenkins任务
+            "device",         # 设备名（磁盘等）
+            "container",      # 容器名
+            "build_number",   # Jenkins构建号
+        ]
+        
+        # 共同 label：仅保留在所有条中取值相同的键（可收集的标签用下面的列表）
         common_labels: Dict[str, Any] = {}
         for k, v in first_lbl.items():
-            if k in ("replica", "pod"):
+            if k in collectable_labels:
                 continue
             if all((a.get("labels") or {}).get(k) == v for a in raw_alerts):
                 common_labels[k] = v
-        replicas = []
-        pods = []
-        for a in raw_alerts:
-            lbl = a.get("labels") or {}
-            if "replica" in lbl:
-                replicas.append(lbl["replica"])
-            if "pod" in lbl:
-                pods.append(lbl["pod"])
+        
+        # 收集各种实体类型的列表
+        collected_entities: Dict[str, List[str]] = {}
+        for label_key in collectable_labels:
+            values = []
+            for a in raw_alerts:
+                lbl = a.get("labels") or {}
+                if label_key in lbl:
+                    value = lbl[label_key]
+                    if value not in values:  # 去重
+                        values.append(value)
+            if values:
+                collected_entities[label_key] = values
+        
         common_labels["_source"] = "prometheus"
         if receiver_name:
             common_labels["_receiver"] = receiver_name
-        if replicas:
-            common_labels["replicas"] = replicas
-        if pods:
-            common_labels["pods"] = pods
         
-        # 提取每个 pod/replica 的值
-        pod_values = _build_pod_values(raw_alerts)
-        if pod_values:
-            common_labels["_pod_values"] = pod_values
+        # 将收集到的实体列表添加到 common_labels（保持向后兼容）
+        for label_key, values in collected_entities.items():
+            if label_key == "replica":
+                common_labels["replicas"] = values
+            elif label_key == "pod":
+                common_labels["pods"] = values
+            else:
+                # 其他类型也添加到 common_labels，使用复数形式
+                plural_key = f"{label_key}s" if not label_key.endswith("s") else label_key
+                common_labels[plural_key] = values
+        
+        # 提取每个实体的值（支持pod、instance、service_name等多种类型）
+        entity_values = _build_entity_values(raw_alerts)
+        if entity_values:
+            common_labels["_entity_values"] = entity_values
+            # 保持向后兼容：如果有pod相关的值，也添加到_pod_values
+            pod_values = {k: v for k, v in entity_values.items() if k.startswith("pod:")}
+            if pod_values:
+                common_labels["_pod_values"] = pod_values
         
         common_annotations: Dict[str, Any] = dict(payload.get("commonAnnotations") or {})
         first = raw_alerts[0]
