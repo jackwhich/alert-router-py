@@ -110,9 +110,17 @@ def generate_plot_from_generator_url(
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
             return None
 
-        fig, ax = plt.subplots(figsize=(10, 4.5), dpi=120)
+        # 创建图表，使用更大的尺寸和更高的DPI以获得更好的质量
+        fig, ax = plt.subplots(figsize=(12, 6), dpi=150)
+        
+        # 设置中文字体支持（如果需要）
+        plt.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans', 'Liberation Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        
         plotted = 0
-        for series in result:
+        colors = plt.cm.tab10(range(max_series))  # 使用不同颜色区分多条曲线
+        
+        for idx, series in enumerate(result):
             if plotted >= max_series:
                 break
             values = series.get("values") or []
@@ -132,8 +140,16 @@ def generate_plot_from_generator_url(
                 ys.append(val)
             if not xs:
                 continue
+            
+            # 确保数据点按时间排序
+            sorted_pairs = sorted(zip(xs, ys), key=lambda x: x[0])
+            xs, ys = zip(*sorted_pairs) if sorted_pairs else ([], [])
+            
+            if not xs:
+                continue
+            
             label = _build_series_label(series.get("metric") or {})
-            ax.plot(xs, ys, linewidth=1.6, label=label)
+            ax.plot(xs, ys, linewidth=2.0, label=label, color=colors[idx], marker='o', markersize=3, alpha=0.8)
             plotted += 1
 
         if plotted == 0:
@@ -141,13 +157,23 @@ def generate_plot_from_generator_url(
             logger.info("Prometheus query_range 结果无法解析为曲线，跳过出图")
             return None
 
-        ax.set_title("Prometheus Alert Trend")
-        ax.set_xlabel("Time (UTC)")
-        ax.set_ylabel("Value")
-        ax.grid(True, linestyle="--", alpha=0.35)
-        ax.legend(loc="best", fontsize=8)
-        fig.autofmt_xdate()
-        fig.tight_layout()
+        # 优化图表样式
+        ax.set_title("Prometheus Alert Trend", fontsize=14, fontweight='bold', pad=15)
+        ax.set_xlabel("Time (UTC)", fontsize=11)
+        ax.set_ylabel("Value", fontsize=11)
+        
+        # 改进网格样式
+        ax.grid(True, linestyle="--", alpha=0.4, linewidth=0.8)
+        ax.set_axisbelow(True)
+        
+        # 优化图例显示
+        ax.legend(loc="best", fontsize=9, framealpha=0.9, fancybox=True, shadow=True)
+        
+        # 优化时间轴显示
+        fig.autofmt_xdate(rotation=45)
+        
+        # 确保图表紧凑但不会裁剪内容
+        fig.tight_layout(pad=2.0)
 
         buffer = BytesIO()
         fig.savefig(buffer, format="png")
