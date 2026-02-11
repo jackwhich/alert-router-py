@@ -42,7 +42,7 @@ class ChannelFilter:
                 continue
             if channel.type != "telegram" or not channel.enabled:
                 continue
-            if alert_status == "resolved" and not channel.send_resolved:
+            if self._should_skip_by_status(channel, alert_status):
                 continue
             if not channel.image_enabled:
                 continue
@@ -69,7 +69,12 @@ class ChannelFilter:
             channel = self.channels.get(channel_name)
             if not channel or not channel.enabled:
                 continue
-            if alert_status == "resolved" and not channel.send_resolved:
+            if self._should_skip_by_status(channel, alert_status):
                 continue
             enabled_channels.append(channel)
         return enabled_channels
+
+    @staticmethod
+    def _should_skip_by_status(channel: Channel, alert_status: str) -> bool:
+        """检查是否应该跳过该渠道（基于告警状态）"""
+        return alert_status == "resolved" and not channel.send_resolved

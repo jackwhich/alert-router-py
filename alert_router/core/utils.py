@@ -3,10 +3,24 @@
 """
 import re
 from datetime import datetime, timedelta
+from typing import Optional
 
 from .logging_config import get_logger
 
 logger = get_logger("alert-router")
+
+INVALID_TIME_STRINGS = {"未知时间", "未知恢复时间", "0001-01-01T00:00:00Z"}
+
+
+def detect_template_format(template_path: str) -> Optional[str]:
+    """检测模板文件的格式（Telegram parse_mode）"""
+    if not template_path:
+        return None
+    if template_path.endswith((".html.j2", ".html")):
+        return "HTML"
+    if template_path.endswith((".md.j2", ".md")):
+        return "Markdown"
+    return None
 
 
 def convert_to_cst(time_str: str) -> str:
@@ -19,7 +33,7 @@ def convert_to_cst(time_str: str) -> str:
     - 2026-02-10T01:47:51.122980105+08:00（Grafana ISO 8601 带时区）
     - 2024-01-15 10:30:15.418 +0000 UTC
     """
-    if not time_str or time_str == "未知时间" or time_str == "未知恢复时间" or time_str == "0001-01-01T00:00:00Z":
+    if not time_str or time_str in INVALID_TIME_STRINGS:
         return time_str
 
     original_time = time_str  # 保存原始值用于日志

@@ -85,11 +85,11 @@ class AlertService:
             }]
 
         # 路由到渠道（使用原始 labels，并附带内部来源用于匹配）
+        source = alert.get("_source") or labels.get("_source")
+        receiver = alert.get("_receiver")
         match_labels = dict(labels)
-        source = alert.get("_source")
         if source:
             match_labels["_source"] = source
-        receiver = alert.get("_receiver")
         if receiver:
             match_labels["_receiver"] = receiver
         target_channels = route(match_labels, self.config)
@@ -99,7 +99,6 @@ class AlertService:
         ctx = self._build_template_context(alert, labels)
 
         # 生成图片（如果需要）
-        source = alert.get("_source") or labels.get("_source")
         image_bytes = self.image_service.generate_image(
             source=source,
             alert=alert,
@@ -269,8 +268,8 @@ class AlertService:
             return {"alert": alertname, "channel": channel_name, "error": error_msg}
         except Exception as e:
             error_msg = str(e)
-            logger.error(
+            logger.critical(
                 f"告警 {alertname} 发送到渠道 {channel_name} 发生未预期错误: {error_msg}",
                 exc_info=True,
             )
-            return {"alert": alertname, "channel": channel_name, "error": error_msg}
+            raise

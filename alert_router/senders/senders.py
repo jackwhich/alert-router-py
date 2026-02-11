@@ -6,6 +6,7 @@
 - 支持会话级别的代理配置
 """
 import json
+import logging
 from typing import Optional, Dict
 
 import requests
@@ -13,6 +14,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from ..core.logging_config import get_logger
+from ..core.utils import detect_template_format
 from ..core.models import Channel
 
 logger = get_logger("alert-router")
@@ -105,10 +107,7 @@ def send_telegram(
     """
     # 如果没有指定 parse_mode，根据模板文件名判断
     if parse_mode is None and ch.template:
-        if ch.template.endswith(".html.j2") or ch.template.endswith(".html"):
-            parse_mode = "HTML"
-        elif ch.template.endswith(".md.j2") or ch.template.endswith(".md"):
-            parse_mode = "Markdown"
+        parse_mode = detect_template_format(ch.template)
 
     # 优先发送图片（caption 最大 1024）
     if photo_bytes:
@@ -145,14 +144,16 @@ def send_telegram(
     
     try:
         logger.info(f"发送 Telegram 消息到渠道 [{ch.name}]，URL: {url}")
-        logger.debug(f"发送 Telegram 消息的完整 payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"发送 Telegram 消息的完整 payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
         response = session.post(url, **kwargs)
         response.raise_for_status()
         logger.info(f"Telegram 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
-        logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
         return response
     except requests.exceptions.RequestException as e:
-        logger.error(f"发送 Telegram 消息失败 (渠道: {ch.name}): {e}")
+        _log_send_error("Telegram", ch.name, e)
         raise
 
 
@@ -176,7 +177,11 @@ def send_webhook(ch: Channel, body: str):
     try:
         _log_webhook_request(ch.name, ch.webhook_url, body)
         # 尝试作为 JSON 发送
-        json_body = json.loads(body)
+        if not body.strip():
+            logger.debug(f"Webhook body 为空 (渠道: {ch.name})，按空 JSON 发送")
+            json_body = {}
+        else:
+            json_body = json.loads(body)
         response = _post_webhook(session, ch.webhook_url, ch.name, json=json_body, **kwargs)
         return response
     except (json.JSONDecodeError, ValueError):
@@ -195,7 +200,8 @@ def send_webhook(ch: Channel, body: str):
 
 def _log_webhook_request(channel_name: str, url: str, body: str):
     logger.info(f"发送 Webhook 消息到渠道 [{channel_name}]，URL: {url}")
-    logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
 
 
 def _post_webhook(
@@ -207,11 +213,16 @@ def _post_webhook(
     response = session.post(url, **kwargs)
     response.raise_for_status()
     logger.info(f"Webhook 消息发送成功 (渠道: {channel_name})，响应状态码: {response.status_code}")
-    try:
-        logger.debug(f"Webhook 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
-    except (json.JSONDecodeError, ValueError):
-        logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
+    if logger.isEnabledFor(logging.DEBUG):
+        try:
+            logger.debug(f"Webhook 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+        except (json.JSONDecodeError, ValueError):
+            logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
     return response
+
+
+def _log_send_error(channel_type: str, channel_name: str, error: Exception):
+    logger.error(f"发送 {channel_type} 消息失败 (渠道: {channel_name}): {error}")
 
 
 def _log_webhook_error(channel_name: str, e: requests.exceptions.RequestException):

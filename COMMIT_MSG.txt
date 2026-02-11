@@ -1,7 +1,17 @@
-修复模板换行被吞掉的问题
+优化告警路由与发送的健壮性
 
 本次提交包含以下调整：
 
-## 模板输出
-- prometheus_telegram.html.j2: 去掉空白裁剪，确保 labels 每行展示
-- grafana_telegram.html.j2: 去掉空白裁剪，确保 labels 每行展示
+## 路由与错误处理
+- alert_service.py: 统一 source 赋值避免不一致
+- alert_service.py: 未预期异常升级为 critical 并抛出
+- routing.py: 多个 default 规则仅提示一次
+
+## 发送与日志
+- senders.py: 处理空 body，按空 JSON 发送
+- senders.py: debug 日志仅在 DEBUG 等级序列化输出
+- senders.py: 统一发送失败日志格式
+
+## 工具与过滤
+- utils.py: 提取模板格式检测与无效时间常量
+- channel_filter.py: 抽取状态过滤公共逻辑
