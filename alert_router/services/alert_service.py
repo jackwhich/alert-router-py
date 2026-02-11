@@ -72,7 +72,7 @@ class AlertService:
             处理结果列表
         """
         labels = alert.get("labels", {})
-        alertname = labels.get("alertname", "Unknown")
+        alertname = labels.get("alertname") or "Unknown"
         alert_status = alert.get("status", "firing")
 
         # Jenkins 告警去重
@@ -143,9 +143,10 @@ class AlertService:
         # 安全获取 title_prefix，如果不存在则使用默认值
         defaults = self.config.get("defaults", {})
         title_prefix = defaults.get("title_prefix", "[ALERT]")
-        
+        alertname = labels.get("alertname") or "Unknown"
+
         return {
-            "title": f"{title_prefix} {labels.get('alertname', 'Unknown')}",
+            "title": f"{title_prefix} {alertname}".strip(),
             "status": alert.get("status"),
             "labels": labels,
             "annotations": alert.get("annotations", {}),

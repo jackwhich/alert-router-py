@@ -1,6 +1,7 @@
 """
 配置加载模块（只负责读配置，不初始化日志；日志由 app 在启动时显式初始化）
 """
+import logging
 import os
 from pathlib import Path
 from typing import Dict, Tuple
@@ -8,6 +9,10 @@ from typing import Dict, Tuple
 import yaml
 
 from .models import Channel
+
+# 注意：此模块不初始化 logger，因为日志配置需要从配置文件读取
+# logger 会在配置加载完成后由 app.py 初始化
+logger = None
 
 
 def _config_path() -> Path:
@@ -50,9 +55,23 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
     Returns:
         Tuple[Dict, Dict[str, Channel]]: (配置字典, 渠道字典)
     """
+    global logger
+    # 尝试获取 logger，如果日志系统还未初始化则使用 print（配置加载阶段）
+    try:
+        logger = logging.getLogger("alert-router")
+    except:
+        logger = None
+    
     path = _config_path()
     if not path.is_file():
-        raise FileNotFoundError(f"配置文件不存在: {path}，可设置环境变量 CONFIG_FILE 指定路径")
+        error_msg = f"配置文件不存在: {path}，可设置环境变量 CONFIG_FILE 指定路径"
+        if logger:
+            logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
+    if logger:
+        logger.info(f"正在加载配置文件: {path}")
+    
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     if raw is None:
@@ -61,13 +80,17 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
     
     # 检查 channels 配置是否存在
     if "channels" not in raw or not isinstance(raw["channels"], dict):
-        raise ValueError("config.yaml 中必须配置 channels 节点")
+        error_msg = "config.yaml 中必须配置 channels 节点"
+        if logger:
+            logger.error(error_msg)
+        raise ValueError(error_msg)
     
     channels = {}
     # 获取全局代理配置和开关
     global_proxy = raw.get("proxy", None)
     global_proxy_enabled = raw.get("proxy_enabled", True)  # 默认启用
     
+    enabled_count = 0
     for k, v in raw["channels"].items():
         # enabled 默认为 True（如果未配置）
         enabled = v.get("enabled", True)
@@ -103,5 +126,14 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
         channel_data = {k: v for k, v in v.items() if k not in ["enabled", "proxy", "proxy_enabled", "send_resolved"]}
         channel_data.update({"proxy": proxy, "proxy_enabled": proxy_enabled, "send_resolved": send_resolved})
         channels[k] = Channel(name=k, enabled=enabled, **channel_data)
+        if enabled:
+            enabled_count += 1
+    
+    if logger:
+        logger.info(f"配置加载完成：共 {len(channels)} 个渠道，其中 {enabled_count} 个已启用")
+        if global_proxy_enabled and global_proxy:
+            logger.debug(f"全局代理已启用: {global_proxy}")
+        elif not global_proxy_enabled:
+            logger.debug("全局代理已禁用")
     
     return raw, channels
