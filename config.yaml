@@ -2,49 +2,32 @@ server:
   host: 0.0.0.0
   port: 8080
 
-# 日志配置
 logging:
-  # 日志目录（相对于项目根目录）
   log_dir: "logs"
-  # 日志文件名
   log_file: "alert-router.log"
-  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
   level: "INFO"
-  # 单个日志文件最大大小（字节，默认 10MB）
   max_bytes: 10485760
-  # 保留的备份文件数量
   backup_count: 5
 
-# 全局代理配置（所有渠道默认使用，可被渠道级别配置覆盖）
-# 
-# 使用 SOCKS5 代理（支持所有协议，更通用）
-# 格式：socks5://proxy:port 或 socks5://user:pass@proxy:port
-# 程序会自动使用 socks5h（由代理端解析 DNS），本机无需能解析外网域名（如 hooks.slack.com）
-# 注意：需要安装 requests[socks] 依赖（已在 requirements.txt 中）
-#
-# 配置示例（请按实际代理地址/端口修改，例如 10.8.16.64:33080）：
 proxy:
-  http: "socks5://10.8.16.64:13080"   # SOCKS5 代理
+  http: "socks5://10.8.16.64:13080"
   https: "socks5://10.8.16.64:13080"
-# 或者使用字符串格式（会自动应用到 http 和 https）：
-# proxy: "socks5://10.8.16.64:33080"    # SOCKS5 代理
-# 或者使用带认证的 SOCKS5 代理：
-# proxy: "socks5://user:pass@10.8.16.64:33080"
 
 # 全局代理开关（控制是否使用代理）
 # true: 启用代理（默认）
 # false: 禁用代理（所有渠道都不使用代理）
 proxy_enabled: true
 
-# Prometheus 告警图片渲染（方案 C：直接 query_range 出图，不依赖 Grafana Panel）
+# Prometheus 告警图片渲染
 prometheus_image:
   enabled: true
+  # Prometheus API 地址，例如: http://prometheus:9090，如果为空则从 generatorURL 解析
+  prometheus_url: ""
   lookback_minutes: 15
   step: "30s"
   timeout_seconds: 8
   max_series: 8
 
-# Jenkins 告警去重（避免 Alertmanager 组更新导致同一 commit 短时间重复通知）
 jenkins_dedup:
   enabled: true
   ttl_seconds: 900
@@ -61,11 +44,11 @@ defaults:
 # - 用途：default、critical、warning、jenkins 等
 
 channels:
-  # ---------- 来源 = Prometheus ----------
+  # Prometheus 告警渠道
   prometheus_telegram_default:
     type: telegram
     enabled: true
-    image_enabled: true   # 该渠道启用 Prometheus 趋势图（仅 Telegram 生效）
+    image_enabled: true
     bot_token: "8502571186:xxxx"
     chat_id: "-5134533386"
     template: "prometheus_telegram.html.j2"
@@ -84,12 +67,12 @@ channels:
     webhook_url: "https://hooks.slack.com/services/T000/B000/XXX"
     template: "prometheus_slack.json.j2"
 
-  # ---------- 来源 = Grafana ----------
+  # Grafana 告警渠道
   grafana_telegram_default:
     type: telegram
     enabled: true
     bot_token: "8502571xxxx"
-    chat_id: "-5134533386"  # Grafana 默认群组（可与 Prometheus 默认同群或单独建群）
+    chat_id: "-5134533386"
     template: "grafana_telegram.html.j2"
 
   grafana_telegram_critical:
@@ -105,15 +88,17 @@ channels:
     webhook_url: "https://hooks.slack.com/services/T000/B000/YYY"
     template: "grafana_slack.json.j2"
 
-  # ---------- 其他（Jenkins 来自 Prometheus/Alertmanager） ----------
+  # Jenkins 告警渠道
   prometheus_telegram_jenkins:
+    # Jenkins 渠道关闭趋势图
+    # Jenkins 告警只发送 firing，不发送 resolved
     type: telegram
     enabled: true
-    image_enabled: false  # Jenkins 渠道关闭趋势图
+    image_enabled: false
     bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567894"  # Jenkins 告警群组
+    chat_id: "-1001234567894"
     template: "prometheus_telegram_jenkins.html.j2"
-    send_resolved: false  # Jenkins 告警只发送 firing，不发送 resolved（对应 Alertmanager 的 send_resolved: false）
+    send_resolved: false
 
 # 路由：所有告警发默认渠道；severity=critical/灾难 时额外发灾难渠道（共 2 个渠道）
 routing:
@@ -130,6 +115,7 @@ routing:
       alertname: "^(?!Jenkins|jenkins).*"
       severity: "critical|灾难"
     send_to: ["prometheus_telegram_critical"]
+
   - match:
       _source: "prometheus"
       _receiver: "prod_ebpay_jenkins_alarm"

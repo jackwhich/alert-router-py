@@ -40,6 +40,7 @@ def _build_series_label(metric: Dict[str, str]) -> str:
 def generate_plot_from_generator_url(
     generator_url: str,
     *,
+    prometheus_url: Optional[str] = None,
     proxies: Optional[Dict[str, str]] = None,
     lookback_minutes: int = 15,
     step: str = "30s",
@@ -56,20 +57,32 @@ def generate_plot_from_generator_url(
         return None
 
     try:
-        parsed = urlparse(generator_url)
-        if not parsed.scheme or not parsed.netloc:
-            logger.warning("generatorURL 非法，跳过出图: %s", generator_url)
-            return None
-
-        q = parse_qs(parsed.query)
+        # 解析查询表达式
+        q = parse_qs(urlparse(generator_url).query)
         expr = (q.get("g0.expr") or [None])[0]
         if not expr:
             logger.info("generatorURL 不含 g0.expr，跳过出图")
             return None
 
+        # 确定 Prometheus API 地址：优先使用配置的 prometheus_url，否则从 generatorURL 解析
+        if prometheus_url:
+            # 使用配置的 Prometheus URL
+            parsed_prometheus = urlparse(prometheus_url)
+            if not parsed_prometheus.scheme or not parsed_prometheus.netloc:
+                logger.warning("配置的 prometheus_url 非法，跳过出图: %s", prometheus_url)
+                return None
+            prometheus_base = f"{parsed_prometheus.scheme}://{parsed_prometheus.netloc}"
+        else:
+            # 从 generatorURL 解析
+            parsed = urlparse(generator_url)
+            if not parsed.scheme or not parsed.netloc:
+                logger.warning("generatorURL 非法，跳过出图: %s", generator_url)
+                return None
+            prometheus_base = f"{parsed.scheme}://{parsed.netloc}"
+
         end = datetime.now(timezone.utc)
         start = end - timedelta(minutes=max(1, lookback_minutes))
-        prometheus_api = f"{parsed.scheme}://{parsed.netloc}/api/v1/query_range"
+        prometheus_api = f"{prometheus_base}/api/v1/query_range"
         params = {
             "query": expr,
             "start": start.isoformat(),

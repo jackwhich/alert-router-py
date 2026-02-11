@@ -120,8 +120,10 @@ def _handle_webhook(payload: dict) -> dict:
             if image_enabled and image_channels:
                 # 优先复用目标 Telegram 渠道的代理配置（如果有）
                 plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
+                prometheus_url = image_cfg.get("prometheus_url") or None
                 image_bytes = generate_plot_from_generator_url(
                     a.get("generatorURL", ""),
+                    prometheus_url=prometheus_url,
                     proxies=plot_proxy,
                     lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
                     step=str(image_cfg.get("step", "30s")),
