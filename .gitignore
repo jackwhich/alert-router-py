@@ -49,6 +49,6 @@ config.prod.yaml
 # 操作系统
 .DS_Store
 Thumbs.db
-
+COMMIT_MSG.txt
 # Prometheus 告警配置目录（不提交到 GitHub）
 dc-prometheus/
