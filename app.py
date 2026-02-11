@@ -99,9 +99,15 @@ async def webhook(req: Request):
         if not result.get("ok"):
             logger.warning(f"[{request_id}] Webhook 处理结果异常: {result}")
         return result
+    except json.JSONDecodeError as e:
+        logger.warning(f"[{request_id}] JSON 解析失败: {e}")
+        return {"ok": False, "error": "Invalid JSON"}
+    except ValueError as e:
+        logger.warning(f"[{request_id}] 数据验证失败: {e}")
+        return {"ok": False, "error": "Validation failed"}
     except Exception as e:
         logger.error(f"[{request_id}] 处理 Webhook 请求失败: {e}", exc_info=True)
-        return {"ok": False, "error": f"处理失败: {str(e)}"}
+        return {"ok": False, "error": "Internal error"}
 
 
 if __name__ == "__main__":

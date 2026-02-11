@@ -6,11 +6,13 @@ Prometheus Alertmanager Webhook 适配器
 
 来源：Prometheus Alertmanager（Prometheus 生态系统的告警管理器）
 """
-
+import logging
 import re
 from typing import Dict, Any, List
 
 from . import build_alert_object
+
+logger = logging.getLogger("alert-router")
 
 
 def _extract_value_from_summary(summary: str) -> str:
@@ -146,7 +148,10 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     raw_alerts = payload.get("alerts") or []
     if not isinstance(raw_alerts, list):
+        logger.warning("Prometheus payload 中 alerts 字段不是列表类型")
         return []
+
+    logger.debug(f"Prometheus Alertmanager 收到 {len(raw_alerts)} 条原始告警")
 
     # 同组多条告警合并为一条发送；从各条告警汇总各种实体类型（pod、instance、service_name等）
     if len(raw_alerts) > 1 and payload.get("groupKey"):
@@ -208,6 +213,7 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         entity_values = _build_entity_values(raw_alerts)
         if entity_values:
             common_labels["_entity_values"] = entity_values
+            logger.debug(f"Prometheus 合并告警：提取到 {len(entity_values)} 个实体的值: {list(entity_values.keys())}")
             # 保持向后兼容：如果有pod相关的值，也添加到_pod_values
             pod_values = {k: v for k, v in entity_values.items() if k.startswith("pod:")}
             if pod_values:
@@ -226,10 +232,12 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "endsAt": first.get("endsAt", ""),
             "generatorURL": first.get("generatorURL", payload.get("externalURL", "")),
         }
+        logger.info(f"Prometheus 将 {len(raw_alerts)} 条告警合并为 1 条发送 (groupKey: {payload.get('groupKey')})")
         return [merged]
 
     alerts: List[Dict[str, Any]] = []
     receiver_name = payload.get("receiver")
+    logger.debug(f"Prometheus 单独处理 {len(raw_alerts)} 条告警 (receiver: {receiver_name})")
     for alert in raw_alerts:
         labels: Dict[str, Any] = dict(alert.get("labels") or {})
         labels["_source"] = "prometheus"

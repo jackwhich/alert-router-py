@@ -4,11 +4,16 @@ Jenkins 告警去重模块
 将去重逻辑从 app 入口解耦，避免入口文件承载业务规则细节。
 当前为单进程内存实现，适用于单进程部署场景。
 """
-from typing import Dict, Optional
+import logging
 import time
+from threading import RLock
+from typing import Dict, Optional
+
+logger = logging.getLogger("alert-router")
 
 # 进程内 Jenkins 去重缓存（key -> 过期时间戳）
 _JENKINS_DEDUP_CACHE: Dict[str, float] = {}
+_JENKINS_DEDUP_LOCK = RLock()
 
 
 def _build_dedup_key(alert: dict, labels: dict) -> Optional[str]:
@@ -53,22 +58,29 @@ def should_skip_jenkins_firing(alert: dict, labels: dict, alert_status: str, con
     clear_on_resolved = bool(dedup_cfg.get("clear_on_resolved", True))
     now = time.time()
 
-    # 清理过期 key，避免缓存无限增长
-    expired_keys = [k for k, exp in _JENKINS_DEDUP_CACHE.items() if exp <= now]
-    for k in expired_keys:
-        _JENKINS_DEDUP_CACHE.pop(k, None)
+    with _JENKINS_DEDUP_LOCK:
+        # 清理过期 key，避免缓存无限增长
+        expired_keys = [k for k, exp in _JENKINS_DEDUP_CACHE.items() if exp <= now]
+        if expired_keys:
+            for k in expired_keys:
+                _JENKINS_DEDUP_CACHE.pop(k, None)
+            logger.debug(f"Jenkins 去重缓存清理了 {len(expired_keys)} 个过期 key")
 
-    if alert_status == "resolved":
-        if clear_on_resolved:
-            _JENKINS_DEDUP_CACHE.pop(key, None)
+        if alert_status == "resolved":
+            if clear_on_resolved:
+                if key in _JENKINS_DEDUP_CACHE:
+                    _JENKINS_DEDUP_CACHE.pop(key, None)
+                    logger.debug(f"Jenkins 去重：告警 {labels.get('alertname', 'Unknown')} resolved，已清理去重缓存 key: {key}")
+            return False
+
+        if alert_status != "firing":
+            return False
+
+        expires_at = _JENKINS_DEDUP_CACHE.get(key)
+        if expires_at and expires_at > now:
+            logger.debug(f"Jenkins 去重：告警 {labels.get('alertname', 'Unknown')} 命中去重窗口，跳过发送 (key: {key}, 剩余时间: {int(expires_at - now)}秒)")
+            return True
+
+        _JENKINS_DEDUP_CACHE[key] = now + max(1, ttl_seconds)
+        logger.debug(f"Jenkins 去重：告警 {labels.get('alertname', 'Unknown')} 首次发送，已记录去重 key: {key} (TTL: {ttl_seconds}秒)")
         return False
-
-    if alert_status != "firing":
-        return False
-
-    expires_at = _JENKINS_DEDUP_CACHE.get(key)
-    if expires_at and expires_at > now:
-        return True
-
-    _JENKINS_DEDUP_CACHE[key] = now + max(1, ttl_seconds)
-    return False

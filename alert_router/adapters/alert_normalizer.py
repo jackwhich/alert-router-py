@@ -7,11 +7,13 @@
 
 两种数据源的 payload 长什么样、用哪些字段区分，见：docs/DATA_SOURCES.md
 """
-
+import logging
 from typing import Dict, Any, List
 from enum import Enum
 from .prometheus_adapter import parse as parse_prometheus
 from .grafana_adapter import parse as parse_grafana
+
+logger = logging.getLogger("alert-router")
 
 
 class WebhookFormat(Enum):
@@ -85,13 +87,21 @@ def normalize(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     数据源识别仅在此处根据 payload 完成，解析器负责写入 _source，路由据此分发。
     """
     format_type = identify_data_source(payload)
+    logger.debug(f"识别数据源类型: {format_type.value}")
     
     if format_type == WebhookFormat.PROMETHEUS_ALERTMANAGER:
-        return parse_prometheus(payload)
+        alerts = parse_prometheus(payload)
+        logger.info(f"Prometheus Alertmanager 解析完成，共 {len(alerts)} 条告警")
+        return alerts
     elif format_type == WebhookFormat.GRAFANA_UNIFIED_ALERTING:
-        return parse_grafana(payload)
+        alerts = parse_grafana(payload)
+        logger.info(f"Grafana Unified Alerting 解析完成，共 {len(alerts)} 条告警")
+        return alerts
     elif format_type == WebhookFormat.SINGLE_ALERT:
-        return parse_single_alert(payload)
+        alerts = parse_single_alert(payload)
+        logger.info(f"单条告警格式解析完成，共 {len(alerts)} 条告警")
+        return alerts
     else:
         # 未知格式，返回空列表
+        logger.warning(f"无法识别的数据源格式，payload 顶层字段: {list(payload.keys()) if isinstance(payload, dict) else '非字典类型'}")
         return []
