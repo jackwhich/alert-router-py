@@ -9,9 +9,11 @@
 
 时间:  {{ startsAt }}
 {% for key, value in labels.items() -%}
-{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source', '_receiver'] -%}
+{% if value is sequence and (value is not string) -%}
+{{ key }}: {{ value | unique | sort | join(', ') }}
+{%- else -%}
 {{ key }}: {{ value }}
-{% endif %}
+{%- endif %}
 {% endfor %}
 
 {% if annotations.get('当前值') -%}
