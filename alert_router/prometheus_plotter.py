@@ -26,7 +26,7 @@ logger = get_logger("alert-router")
 
 def _build_series_label(metric: Dict[str, str]) -> str:
     """从 Prometheus metric 标签构造曲线名称。"""
-    if not isinstance(metric, dict):
+    if not metric:
         return "series"
     pairs = []
     for k in sorted(metric.keys()):
