@@ -25,15 +25,14 @@
   {% set build_status = 'ABORTED' %}
 {% endif %}
 
-<b>环境:</b> <code>{{ env }}</code>
-<b>任务:</b> <code>{{ task }}</code>
-<b>Jenkins Job:</b> <code>{{ job_name }}</code>
-<b>状态:</b> <u>{{ build_status }}</u> <i>({{ status | default('unknown') }})</i>
+<b>1) 环境:</b> {{ env }}
+<b>任务:</b> {{ task }}
+<b>Jenkins Job:</b> {{ job_name }}
+<b>状态:</b> {{ build_status }} ({{ status | default('unknown') }})
 <b>分支:</b> {{ labels.gitBranch | default('N/A') }}
-<b>Commit:</b> <code>{{ labels.check_commitID | default('N/A') }}</code>
-{% if labels.build_number %}
-<b>Build:</b> <code>{{ labels.build_number }}</code>
-{% endif %}
+<b>Commit:</b> {{ labels.check_commitID | default('N/A') }}
+<b>Build:</b> {{ labels.build_number | default('N/A') }}
 <b>结论:</b> <b>PGP签名校验失败</b>
+<b>──────────────</b>
 
 <b>时间:</b> {{ startsAt }}

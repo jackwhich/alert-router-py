@@ -15,6 +15,7 @@ from alert_router.logging_config import setup_logging
 from alert_router.routing import route
 from requests.exceptions import HTTPError
 from alert_router.senders import send_telegram, send_webhook
+from alert_router.prometheus_plotter import generate_plot_from_generator_url
 from alert_router.template_renderer import render
 
 # 加载配置（config 只读配置，不初始化日志）
@@ -87,6 +88,29 @@ def _handle_webhook(payload: dict) -> dict:
         }
 
         alert_status = a.get("status", "firing")
+        source = labels.get("_source")
+        image_bytes = None
+        if source == "prometheus":
+            image_cfg = CONFIG.get("prometheus_image", {}) or {}
+            image_enabled = image_cfg.get("enabled", True)
+            telegram_channels = [CHANNELS[t] for t in targets if CHANNELS.get(t) and CHANNELS[t].type == "telegram"]
+            has_telegram_target = bool(telegram_channels)
+            if image_enabled and has_telegram_target:
+                # 优先复用目标 Telegram 渠道的代理配置（如果有）
+                plot_proxy = next((c.proxy for c in telegram_channels if c.proxy), None)
+                image_bytes = generate_plot_from_generator_url(
+                    a.get("generatorURL", ""),
+                    proxies=plot_proxy,
+                    lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
+                    step=str(image_cfg.get("step", "30s")),
+                    timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
+                    max_series=int(image_cfg.get("max_series", 8)),
+                )
+                if image_bytes:
+                    logger.info(f"告警 {alertname} 已生成趋势图，将优先按图片发送 Telegram")
+                else:
+                    logger.info(f"告警 {alertname} 未生成趋势图，将按文本发送 Telegram")
+
         sent_channels = []
         for t in targets:
             ch = CHANNELS.get(t)
@@ -107,7 +131,17 @@ def _handle_webhook(payload: dict) -> dict:
                 body = render(ch.template, ctx)
                 logger.info(f"发送到渠道 [{t}] 的内容:\n{body}")
                 if ch.type == "telegram":
-                    send_telegram(ch, body)
+                    # Prometheus 告警优先图片发送；失败时自动回退文本，避免漏告警
+                    if image_bytes:
+                        try:
+                            send_telegram(ch, body, photo_bytes=image_bytes)
+                        except Exception as img_err:
+                            logger.warning(
+                                f"告警 {alertname} 渠道 {t} 图片发送失败，自动回退文本发送: {img_err}"
+                            )
+                            send_telegram(ch, body)
+                    else:
+                        send_telegram(ch, body)
                 else:
                     send_webhook(ch, body)
                 sent_channels.append(t)

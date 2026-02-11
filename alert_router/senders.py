@@ -12,7 +12,12 @@ from .models import Channel
 logger = get_logger("alert-router")
 
 
-def send_telegram(ch: Channel, text: str, parse_mode: Optional[str] = None):
+def send_telegram(
+    ch: Channel,
+    text: str,
+    parse_mode: Optional[str] = None,
+    photo_bytes: Optional[bytes] = None,
+):
     """
     发送 Telegram 消息
     
@@ -24,31 +29,45 @@ def send_telegram(ch: Channel, text: str, parse_mode: Optional[str] = None):
     Returns:
         requests.Response: HTTP 响应对象
     """
-    url = f"https://api.telegram.org/bot{ch.bot_token}/sendMessage"
-    
     # 如果没有指定 parse_mode，根据模板文件名判断
     if parse_mode is None and ch.template:
         if ch.template.endswith(".html.j2") or ch.template.endswith(".html"):
             parse_mode = "HTML"
         elif ch.template.endswith(".md.j2") or ch.template.endswith(".md"):
             parse_mode = "Markdown"
-    
-    payload = {
-        "chat_id": ch.chat_id,
-        "text": text,
-        "disable_web_page_preview": True
-    }
-    if parse_mode:
-        payload["parse_mode"] = parse_mode
-    
-    kwargs = {
-        "json": payload,
-        "timeout": 10
-    }
+
+    # 优先发送图片（caption 最大 1024）
+    if photo_bytes:
+        url = f"https://api.telegram.org/bot{ch.bot_token}/sendPhoto"
+        payload = {
+            "chat_id": ch.chat_id,
+            "caption": text[:1024],
+        }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        kwargs = {
+            "data": payload,
+            "files": {"photo": ("alert.png", photo_bytes, "image/png")},
+            "timeout": 15,
+        }
+    else:
+        url = f"https://api.telegram.org/bot{ch.bot_token}/sendMessage"
+        payload = {
+            "chat_id": ch.chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        kwargs = {
+            "json": payload,
+            "timeout": 10,
+        }
+
     # 如果配置了代理，则使用代理
     if ch.proxy:
         kwargs["proxies"] = ch.proxy
-    
+
     try:
         logger.info(f"发送 Telegram 消息到渠道 [{ch.name}]，URL: {url}")
         logger.debug(f"发送 Telegram 消息的完整 payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
