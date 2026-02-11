@@ -7,9 +7,63 @@ Prometheus Alertmanager Webhook 适配器
 来源：Prometheus Alertmanager（Prometheus 生态系统的告警管理器）
 """
 
+import re
 from typing import Dict, Any, List
 
 from . import build_alert_object
+
+
+def _extract_value_from_summary(summary: str) -> str:
+    """
+    从 summary 中提取当前值
+    支持格式：
+    - "nginx 1分钟内状态码5XX大于50|当前值：325"
+    - "CPU usage is above 80%|当前值：85%"
+    - "当前值：123"
+    """
+    if not summary:
+        return ""
+    # 尝试匹配 "当前值：XXX" 或 "当前值: XXX"
+    match = re.search(r'当前值[：:]\s*([^\s|]+)', summary)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def _build_pod_values(raw_alerts: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    构建 pod 到值的映射
+    返回格式: {"pod-name": "32.96%"}
+    注意：同一个 pod 可能出现在多个告警中，取第一个值
+    """
+    pod_values: Dict[str, str] = {}
+    for alert in raw_alerts:
+        labels = alert.get("labels") or {}
+        annotations = alert.get("annotations") or {}
+        
+        # 提取 pod
+        pod = labels.get("pod")
+        if not pod:
+            continue
+        
+        # 如果这个 pod 已经有值了，跳过（避免覆盖）
+        if f"pod:{pod}" in pod_values:
+            continue
+        
+        # 从 summary 中提取值
+        summary = annotations.get("summary", "")
+        value = _extract_value_from_summary(summary)
+        
+        if not value:
+            # 如果没有从 summary 提取到，尝试从 description 或其他字段
+            description = annotations.get("description", "")
+            value = _extract_value_from_summary(description)
+        
+        # 存储 pod 的值
+        if value:
+            pod_values[f"pod:{pod}"] = value
+    
+    return pod_values
 
 
 def detect(payload: Dict[str, Any]) -> bool:
@@ -84,6 +138,12 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             common_labels["replicas"] = replicas
         if pods:
             common_labels["pods"] = pods
+        
+        # 提取每个 pod/replica 的值
+        pod_values = _build_pod_values(raw_alerts)
+        if pod_values:
+            common_labels["_pod_values"] = pod_values
+        
         common_annotations: Dict[str, Any] = dict(payload.get("commonAnnotations") or {})
         first = raw_alerts[0]
         first_ann = first.get("annotations") or {}

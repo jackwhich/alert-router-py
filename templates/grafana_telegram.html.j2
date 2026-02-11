@@ -9,7 +9,7 @@
 
 时间:  {{ startsAt }}
 {% for key, value in labels.items() -%}
-{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source'] -%}
+{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source', '_receiver'] -%}
 {{ key }}: {{ value }}
 {% endif %}
 {% endfor %}
