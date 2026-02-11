@@ -83,6 +83,7 @@ channels:
   grafana_telegram_default:
     type: telegram
     enabled: true
+    image_enabled: true
     bot_token: "8502571186:xxxxx"
     chat_id: "-5134533386"
     template: "grafana_telegram.html.j2"
@@ -90,6 +91,7 @@ channels:
   grafana_telegram_critical:
     type: telegram
     enabled: false
+    image_enabled: false
     bot_token: "8502571186:xxxxx"
     chat_id: "-5134533386"
     template: "grafana_telegram.html.j2"
