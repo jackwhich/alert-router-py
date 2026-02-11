@@ -46,6 +46,7 @@ def generate_plot_from_grafana_generator_url(
     generator_url: str,
     *,
     grafana_url: Optional[str] = None,
+    grafana_api_token: Optional[str] = None,
     prometheus_url: Optional[str] = None,
     proxies: Optional[Dict[str, str]] = None,
     lookback_minutes: int = 15,
@@ -80,10 +81,11 @@ def generate_plot_from_grafana_generator_url(
         except Exception:
             pass
     logger.info(
-        "Grafana 图片生成配置: generatorURL=%s, grafana_url=%s, effective_grafana_url=%s",
+        "Grafana 图片生成配置: generatorURL=%s, grafana_url=%s, effective_grafana_url=%s, grafana_token_set=%s",
         generator_url,
         grafana_url,
         effective_grafana_url,
+        bool(grafana_api_token),
     )
     
     # 方法2：如果配置了 grafana_url 或从 generatorURL 提取到了，优先使用 Grafana 渲染服务
@@ -92,6 +94,7 @@ def generate_plot_from_grafana_generator_url(
         result = _generate_from_grafana_renderer(
             generator_url=generator_url,
             grafana_url=effective_grafana_url,
+            grafana_api_token=grafana_api_token,
             proxies=proxies,
             timeout_seconds=timeout_seconds,
             alertname=alertname,
@@ -121,6 +124,7 @@ def generate_plot_from_grafana_generator_url(
             result = _generate_from_grafana_alert_rule(
                 generator_url=generator_url,
                 grafana_url=effective_grafana_url,
+                grafana_api_token=grafana_api_token,
                 prometheus_url=prometheus_url,
                 proxies=proxies,
                 lookback_minutes=lookback_minutes,
@@ -364,6 +368,12 @@ def _generate_from_prometheus_query(
         return None
 
 
+def _build_grafana_headers(grafana_api_token: Optional[str]) -> Optional[Dict[str, str]]:
+    if not grafana_api_token:
+        return None
+    return {"Authorization": f"Bearer {grafana_api_token}"}
+
+
 def _extract_alert_rule_uid(generator_url: str) -> Optional[str]:
     """从 Grafana generatorURL 中提取告警规则 UID。
     
@@ -396,6 +406,7 @@ def _extract_alert_rule_uid(generator_url: str) -> Optional[str]:
 def _generate_from_grafana_alert_rule(
     generator_url: str,
     grafana_url: str,
+    grafana_api_token: Optional[str] = None,
     prometheus_url: Optional[str] = None,
     proxies: Optional[Dict[str, str]] = None,
     lookback_minutes: int = 15,
@@ -426,10 +437,12 @@ def _generate_from_grafana_alert_rule(
         api_url = f"{grafana_base}/api/alerting/rule/{rule_uid}"
         
         logger.debug(f"从 Grafana API 获取告警规则详情: {api_url}")
+        headers = _build_grafana_headers(grafana_api_token)
         response = requests.get(
             api_url,
             timeout=timeout_seconds,
             proxies=proxies,
+            headers=headers,
         )
         
         # 如果 404，可能是 Grafana 8.x，尝试其他 API
@@ -701,6 +714,7 @@ def _generate_from_grafana_alert_rule(
 def _generate_from_grafana_renderer(
     generator_url: str,
     grafana_url: str,
+    grafana_api_token: Optional[str] = None,
     proxies: Optional[Dict[str, str]] = None,
     timeout_seconds: int = 8,
     alertname: Optional[str] = None,
@@ -724,10 +738,12 @@ def _generate_from_grafana_renderer(
         # 步骤1：获取告警规则详情，查找关联的 dashboard 和 panel
         api_url = f"{grafana_base}/api/alerting/rule/{rule_uid}"
         logger.debug(f"从 Grafana API 获取告警规则详情: {api_url}")
+        headers = _build_grafana_headers(grafana_api_token)
         response = requests.get(
             api_url,
             timeout=timeout_seconds,
             proxies=proxies,
+            headers=headers,
         )
         
         if response.status_code == 404:
@@ -793,6 +809,7 @@ def _generate_from_grafana_renderer(
             params=params,
             timeout=timeout_seconds + 5,  # 渲染可能需要更长时间
             proxies=proxies,
+            headers=headers,
         )
         
         if response.status_code == 404:

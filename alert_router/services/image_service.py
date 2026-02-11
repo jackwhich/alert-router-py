@@ -184,6 +184,7 @@ class ImageService:
             )
 
         grafana_url = image_cfg.get("grafana_url") or None
+        grafana_api_token = image_cfg.get("grafana_api_token") or None
         prometheus_url = image_cfg.get("prometheus_url") or None
         
         # 根据告警状态选择时间：firing 用 startsAt，resolved 用 endsAt
@@ -196,6 +197,7 @@ class ImageService:
         image_bytes = generate_plot_from_grafana_generator_url(
             alert.get("generatorURL", ""),
             grafana_url=grafana_url,
+            grafana_api_token=grafana_api_token,
             prometheus_url=prometheus_url,
             proxies=plot_proxy,
             lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
