@@ -3,7 +3,7 @@
 
 数据源识别与解析：
 - 数据源（Grafana / Prometheus）仅根据「入参 payload 的顶层字段」在此处唯一判定。
-- 判定结果决定调用哪个 adapter 解析，解析时由 adapter 写入 _source，路由再按 _source 分发。
+- 判定结果决定调用哪个 adapter 解析，解析时由 adapter 写入告警对象的 _source 字段，路由再按 _source 分发。
 
 两种数据源的 payload 长什么样、用哪些字段区分，见：docs/DATA_SOURCES.md
 """
@@ -66,10 +66,7 @@ def parse_single_alert(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         "generatorURL": "..."
     }
     """
-    labels = payload.get("labels", {})
-    # 如果 labels 中没有 _source，则标记为 unknown（兼容格式）
-    if "_source" not in labels:
-        labels["_source"] = "unknown"
+    labels = payload.get("labels", {}) or {}
     
     return [{
         "status": payload.get("status", "firing"),
@@ -77,7 +74,8 @@ def parse_single_alert(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         "annotations": payload.get("annotations", {}),
         "startsAt": payload.get("startsAt", ""),
         "endsAt": payload.get("endsAt", ""),
-        "generatorURL": payload.get("generatorURL", "")
+        "generatorURL": payload.get("generatorURL", ""),
+        "_source": "unknown",
     }]
 
 

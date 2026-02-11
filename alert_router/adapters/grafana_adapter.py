@@ -85,9 +85,9 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         raw_alerts = payload["alerts"]
         logger.debug(f"Grafana Unified Alerting 收到 {len(raw_alerts)} 条原始告警")
         for alert in raw_alerts:
-            # 添加来源标识到 labels，用于路由区分
-            labels: Dict[str, Any] = dict(alert.get("labels") or {})
-            labels["_source"] = "grafana"  # 添加来源标识
+            # 添加来源标识到告警对象（labels 保持原始）
+            raw_labels = dict(alert.get("labels") or {})
+            labels: Dict[str, Any] = dict(raw_labels)
 
             annotations: Dict[str, Any] = dict(alert.get("annotations") or {})
             # 解析 Grafana 特有「当前值」（values.B 或 valueString），与 old_py/webhook_nginx_8081 一致
@@ -96,15 +96,15 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 annotations["当前值"] = current_value
                 logger.debug(f"Grafana 告警解析到当前值: {current_value}")
 
-            alerts.append(
-                build_alert_object(
-                    alert=alert,
-                    payload=payload,
-                    labels=labels,
-                    annotations=annotations,
-                    include_fingerprint=True,
-                )
+            alert_obj = build_alert_object(
+                alert=alert,
+                payload=payload,
+                labels=labels,
+                annotations=annotations,
+                include_fingerprint=True,
             )
+            alert_obj["_source"] = "grafana"
+            alerts.append(alert_obj)
     else:
         logger.warning("Grafana payload 中 alerts 字段不存在或不是列表类型")
     return alerts

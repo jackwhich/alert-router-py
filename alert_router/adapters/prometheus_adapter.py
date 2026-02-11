@@ -194,30 +194,16 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             if values:
                 collected_entities[label_key] = values
         
-        common_labels["_source"] = "prometheus"
-        if receiver_name:
-            common_labels["_receiver"] = receiver_name
-        
-        # 将收集到的实体列表添加到 common_labels（保持向后兼容）
+        # raw_labels：用于展示原始 labels（不包含内部字段），多值标签以列表形式保留
+        raw_labels: Dict[str, Any] = dict(payload.get("commonLabels") or {})
         for label_key, values in collected_entities.items():
-            if label_key == "replica":
-                common_labels["replicas"] = values
-            elif label_key == "pod":
-                common_labels["pods"] = values
-            else:
-                # 其他类型也添加到 common_labels，使用复数形式
-                plural_key = f"{label_key}s" if not label_key.endswith("s") else label_key
-                common_labels[plural_key] = values
+            if values:
+                raw_labels[label_key] = values if len(values) > 1 else values[0]
         
         # 提取每个实体的值（支持pod、instance、service_name等多种类型）
         entity_values = _build_entity_values(raw_alerts)
         if entity_values:
-            common_labels["_entity_values"] = entity_values
             logger.debug(f"Prometheus 合并告警：提取到 {len(entity_values)} 个实体的值: {list(entity_values.keys())}")
-            # 保持向后兼容：如果有pod相关的值，也添加到_pod_values
-            pod_values = {k: v for k, v in entity_values.items() if k.startswith("pod:")}
-            if pod_values:
-                common_labels["_pod_values"] = pod_values
         
         common_annotations: Dict[str, Any] = dict(payload.get("commonAnnotations") or {})
         first = raw_alerts[0]
@@ -226,12 +212,15 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             common_annotations["summary"] = first_ann["summary"]
         merged = {
             "status": payload.get("status", first.get("status", "firing")),
-            "labels": common_labels,
+            "labels": raw_labels,
             "annotations": common_annotations,
             "startsAt": first.get("startsAt", ""),
             "endsAt": first.get("endsAt", ""),
             "generatorURL": first.get("generatorURL", payload.get("externalURL", "")),
+            "_source": "prometheus",
         }
+        if receiver_name:
+            merged["_receiver"] = receiver_name
         logger.info(f"Prometheus 将 {len(raw_alerts)} 条告警合并为 1 条发送 (groupKey: {payload.get('groupKey')})")
         return [merged]
 
@@ -239,17 +228,17 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     receiver_name = payload.get("receiver")
     logger.debug(f"Prometheus 单独处理 {len(raw_alerts)} 条告警 (receiver: {receiver_name})")
     for alert in raw_alerts:
-        labels: Dict[str, Any] = dict(alert.get("labels") or {})
-        labels["_source"] = "prometheus"
-        if receiver_name:
-            labels["_receiver"] = receiver_name
+        raw_labels = dict(alert.get("labels") or {})
+        labels: Dict[str, Any] = dict(raw_labels)
         annotations: Dict[str, Any] = dict(alert.get("annotations") or {})
-        alerts.append(
-            build_alert_object(
-                alert=alert,
-                payload=payload,
-                labels=labels,
-                annotations=annotations,
-            )
+        alert_obj = build_alert_object(
+            alert=alert,
+            payload=payload,
+            labels=labels,
+            annotations=annotations,
         )
+        alert_obj["_source"] = "prometheus"
+        if receiver_name:
+            alert_obj["_receiver"] = receiver_name
+        alerts.append(alert_obj)
     return alerts
