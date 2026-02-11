@@ -33,10 +33,12 @@ prometheus_image:
 # Grafana 告警图片渲染
 grafana_image:
   enabled: true
-  # Grafana 地址，例如: http://grafana:3000（用于 Grafana 渲染服务，可选）
+  # Grafana 地址，例如: http://grafana:3000（可选，如果未配置会从 generatorURL 自动提取）
+  # 用于调用 Grafana 渲染服务生成图片（需要 Grafana 配置了渲染服务）
   grafana_url: ""
-  # Prometheus API 地址，例如: http://prometheus:9090（如果 Grafana 使用 Prometheus 数据源，用于提取查询表达式）
-  prometheus_url: ""
+  # Prometheus API 地址，例如: http://prometheus:9090（可选，仅当 Grafana 使用 Prometheus 数据源时需要）
+  # 如果未配置，将使用 Grafana 渲染服务生成图片
+  # prometheus_url: ""
   # 图片生成是否使用代理（默认 false，因为 Grafana/Prometheus 通常是内网地址）
   use_proxy: false
   lookback_minutes: 15
