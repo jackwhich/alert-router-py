@@ -28,7 +28,9 @@
 <b>1) 环境:</b> {{ env }}
 <b>任务:</b> {{ task }}
 <b>Jenkins Job:</b> {{ job_name }}
+<b>Build:</b> {{ labels.build_number | default('N/A') }}
 <b>状态:</b> {{ build_status }} ({{ status | default('unknown') }})
+<b>错误类型:</b> {{ labels.error_type | default('N/A') }}
 <b>分支:</b> {{ labels.gitBranch | default('N/A') }}
 <b>Commit:</b> {{ labels.check_commitID | default('N/A') }}
 <b>结论:</b> <b>PGP签名校验失败</b>
