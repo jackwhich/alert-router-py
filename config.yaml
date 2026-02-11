@@ -120,8 +120,9 @@ routing:
   # Jenkins 告警（Prometheus 来源）走专用模板/群组
   - match:
       _source: "prometheus"
+      _receiver: "Prometheus"
       jenkins_job: ".*"
-    send_to: ["prometheus_telegram_jenkins"]
+    send_to: ["prometheus_telegram_default"]
 
   # 告警来源 = Prometheus（支持 critical 或 灾难）
   - match:
@@ -131,8 +132,9 @@ routing:
     send_to: ["prometheus_telegram_critical"]
   - match:
       _source: "prometheus"
+      _receiver: "prod_ebpay_jenkins_alarm"
       alertname: "^(?!Jenkins|jenkins).*"
-    send_to: ["prometheus_telegram_default", "prometheus_slack"]
+    send_to: ["prometheus_telegram_jenkins"]
 
   # 告警来源 = Grafana（支持 critical 或 灾难）
   - match:
