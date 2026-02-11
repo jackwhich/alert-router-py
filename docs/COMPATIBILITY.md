@@ -161,6 +161,53 @@ routing:
 - 告警聚合逻辑需要在 Alertmanager 层面处理
 - 模板中访问 values/valueString 的方式
 
+## 架构变化
+
+### 目录结构变化
+
+**旧结构**:
+```
+alert-router-py/
+├── adapters/          # 在根目录
+├── alert_router/      # 所有文件平铺
+│   ├── config.py
+│   ├── routing.py
+│   ├── senders.py
+│   └── ...
+```
+
+**新结构** (模块化):
+```
+alert-router-py/
+├── alert_router/
+│   ├── core/          # 核心功能
+│   ├── adapters/      # 数据源适配器（移入）
+│   ├── services/      # 业务服务层
+│   ├── plotters/      # 绘图模块
+│   ├── routing/       # 路由模块
+│   ├── senders/       # 发送模块
+│   └── templates/     # 模板渲染
+```
+
+### 导入路径变化
+
+**旧导入**:
+```python
+from alert_router.config import load_config
+from adapters.alert_normalizer import normalize
+```
+
+**新导入** (推荐):
+```python
+from alert_router.core.config import load_config
+from alert_router.adapters.alert_normalizer import normalize
+```
+
+**向后兼容导入** (仍然支持):
+```python
+from alert_router import load_config  # 通过 __init__.py 导出
+```
+
 ## 测试建议
 
 1. **功能测试**：
@@ -168,12 +215,21 @@ routing:
    - 测试 resolved 告警发送
    - 测试 send_resolved: false 的渠道
    - 测试路由规则匹配
+   - 测试图片生成功能
+   - 测试 Jenkins 去重功能
 
 2. **兼容性测试**：
    - 对比新旧代码的输出格式
    - 验证时间转换是否正确
    - 验证模板渲染是否一致
+   - 验证导入路径是否正常工作
 
 3. **性能测试**：
    - 并发请求测试
    - 大量告警处理测试
+   - HTTP 连接池性能测试
+
+4. **架构测试**：
+   - 验证服务层是否正常工作
+   - 验证模块化导入是否正常
+   - 验证向后兼容性

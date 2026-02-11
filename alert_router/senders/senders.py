@@ -1,15 +1,82 @@
 """
 消息发送模块
+
+性能优化：
+- 使用 HTTP 连接池复用连接，减少连接建立开销
+- 支持会话级别的代理配置
 """
 import json
-from typing import Optional
+from typing import Optional, Dict
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-from .logging_config import get_logger
-from .models import Channel
+from ..core.logging_config import get_logger
+from ..core.models import Channel
 
 logger = get_logger("alert-router")
+
+# HTTP 连接池配置
+# 使用连接池复用连接，提高性能
+# 注意：在生产环境中，会话会长期复用，通常不需要手动清理
+# 如果需要清理（例如测试环境），可以调用 clear_session_cache()
+_session_cache: Dict[str, requests.Session] = {}
+
+
+def _get_session(proxy: Optional[Dict[str, str]] = None) -> requests.Session:
+    """
+    获取或创建 HTTP 会话（带连接池）
+    
+    Args:
+        proxy: 代理配置
+        
+    Returns:
+        requests.Session 实例
+    """
+    # 使用代理配置作为缓存键
+    cache_key = str(proxy) if proxy else "no_proxy"
+    
+    if cache_key not in _session_cache:
+        session = requests.Session()
+        
+        # 配置重试策略
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=0.3,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["POST", "GET"]
+        )
+        
+        # 配置 HTTP 适配器（连接池）
+        adapter = HTTPAdapter(
+            pool_connections=10,  # 连接池大小
+            pool_maxsize=20,     # 最大连接数
+            max_retries=retry_strategy,
+        )
+        
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        # 设置代理
+        if proxy:
+            session.proxies.update(proxy)
+        
+        _session_cache[cache_key] = session
+    
+    return _session_cache[cache_key]
+
+
+def clear_session_cache():
+    """
+    清理所有缓存的 HTTP 会话（主要用于测试或资源清理）
+    
+    注意：在生产环境中通常不需要调用此函数，会话会长期复用以提高性能
+    """
+    global _session_cache
+    for session in _session_cache.values():
+        session.close()
+    _session_cache.clear()
 
 
 def send_telegram(
@@ -39,9 +106,11 @@ def send_telegram(
     # 优先发送图片（caption 最大 1024）
     if photo_bytes:
         url = f"https://api.telegram.org/bot{ch.bot_token}/sendPhoto"
+        # 确保 text 不为 None，如果为 None 则使用空字符串
+        caption = (text or "")[:1024]
         payload = {
             "chat_id": ch.chat_id,
-            "caption": text[:1024],
+            "caption": caption,
         }
         if parse_mode:
             payload["parse_mode"] = parse_mode
@@ -64,14 +133,13 @@ def send_telegram(
             "timeout": 10,
         }
 
-    # 如果配置了代理，则使用代理
-    if ch.proxy:
-        kwargs["proxies"] = ch.proxy
-
+    # 使用连接池会话
+    session = _get_session(proxy=ch.proxy)
+    
     try:
         logger.info(f"发送 Telegram 消息到渠道 [{ch.name}]，URL: {url}")
         logger.debug(f"发送 Telegram 消息的完整 payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
-        response = requests.post(url, **kwargs)
+        response = session.post(url, **kwargs)
         response.raise_for_status()
         logger.info(f"Telegram 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
         logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
@@ -93,16 +161,16 @@ def send_webhook(ch: Channel, body: str):
         requests.Response: HTTP 响应对象
     """
     kwargs = {"timeout": 10}
-    # 如果配置了代理，则使用代理
-    if ch.proxy:
-        kwargs["proxies"] = ch.proxy
+    
+    # 使用连接池会话
+    session = _get_session(proxy=ch.proxy)
     
     try:
         # 尝试作为 JSON 发送
         logger.info(f"发送 Webhook 消息到渠道 [{ch.name}]，URL: {ch.webhook_url}")
         logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
         json_body = json.loads(body)
-        response = requests.post(ch.webhook_url, json=json_body, **kwargs)
+        response = session.post(ch.webhook_url, json=json_body, **kwargs)
         response.raise_for_status()
         logger.info(f"Webhook 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
         try:
@@ -116,7 +184,7 @@ def send_webhook(ch: Channel, body: str):
         logger.info(f"发送 Webhook 消息到渠道 [{ch.name}]，URL: {ch.webhook_url}")
         logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
         try:
-            response = requests.post(ch.webhook_url, data=body, **kwargs)
+            response = session.post(ch.webhook_url, data=body, **kwargs)
             response.raise_for_status()
             logger.info(f"Webhook 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
             try:

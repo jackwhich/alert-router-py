@@ -251,9 +251,11 @@ description: CPU usage on server1 has returned to normal levels (45%)
 
 你可以根据需要修改模板文件：
 
-1. **修改 Telegram 模板**：编辑 `templates/telegram.md.j2`
-2. **修改 Slack 模板**：编辑 `templates/slack.json.j2`
+1. **修改 Telegram 模板**：编辑 `templates/prometheus_telegram.html.j2` 或 `templates/grafana_telegram.html.j2`
+2. **修改 Slack 模板**：编辑 `templates/prometheus_slack.json.j2` 或 `templates/grafana_slack.json.j2`
 3. **创建新模板**：创建新的 `.j2` 文件，在 `config.yaml` 中引用
+
+**注意**：模板文件位于项目根目录的 `templates/` 目录，模板渲染逻辑在 `alert_router/templates/template_renderer.py` 中。
 
 ### 模板示例：更详细的 Telegram 模板
 
@@ -285,15 +287,14 @@ description: CPU usage on server1 has returned to normal levels (45%)
 你可以使用以下 Python 代码测试模板渲染：
 
 ```python
-from jinja2 import Environment, FileSystemLoader
-
-env = Environment(loader=FileSystemLoader("templates"))
+from alert_router.templates import render
 
 # 测试数据
 ctx = {
     "title": "[ALERT] HighCPU",
     "status": "firing",
     "labels": {
+        "alertname": "HighCPU",
         "severity": "critical",
         "env": "prod",
         "service": "gateway",
@@ -303,16 +304,45 @@ ctx = {
         "summary": "CPU usage is above 80%",
         "description": "CPU usage on server1 is 85%"
     },
+    "startsAt": "2024-01-15 10:30:00",
+    "endsAt": "",
     "generatorURL": "http://prometheus:9090/graph?g0.expr=cpu_usage"
 }
 
-# 渲染 Telegram 模板
-telegram_template = env.get_template("telegram.md.j2")
-print("=== Telegram 模板 ===")
-print(telegram_template.render(**ctx))
+# 渲染 Prometheus Telegram 模板
+prometheus_telegram = render("prometheus_telegram.html.j2", ctx)
+print("=== Prometheus Telegram 模板 ===")
+print(prometheus_telegram)
 
-# 渲染 Slack 模板
-slack_template = env.get_template("slack.json.j2")
-print("\n=== Slack 模板 ===")
-print(slack_template.render(**ctx))
+# 渲染 Prometheus Slack 模板
+prometheus_slack = render("prometheus_slack.json.j2", ctx)
+print("\n=== Prometheus Slack 模板 ===")
+print(prometheus_slack)
 ```
+
+### 使用测试脚本
+
+项目提供了测试脚本，可以直接测试 webhook：
+
+```bash
+# 测试 Prometheus Alertmanager webhook
+./scripts/test-alertmanager.sh
+
+# 测试通用 webhook
+./scripts/test-webhook.sh
+```
+
+## 模板文件位置
+
+所有模板文件位于项目根目录的 `templates/` 目录：
+
+- `prometheus_telegram.html.j2` - Prometheus → Telegram HTML 模板
+- `prometheus_slack.json.j2` - Prometheus → Slack JSON 模板
+- `prometheus_telegram_jenkins.html.j2` - Jenkins 专用 Telegram 模板
+- `grafana_telegram.html.j2` - Grafana → Telegram HTML 模板
+- `grafana_slack.json.j2` - Grafana → Slack JSON 模板
+
+模板渲染器位于 `alert_router/templates/template_renderer.py`，会自动处理：
+- 时间转换（UTC → CST）
+- URL 转链接（Telegram HTML）
+- description 中的时间替换（Slack）

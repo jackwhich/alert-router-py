@@ -25,6 +25,9 @@ prometheus_image:
   prometheus_url: ""
   # 图片生成是否使用代理（默认 false，因为 Prometheus 通常是内网地址）
   use_proxy: false
+  # 绘图引擎选择: "plotly" (推荐，更美观) 或 "matplotlib" (传统，兼容性好)
+  # 如果选择 plotly 但未安装，会自动回退到 matplotlib
+  plot_engine: "plotly"
   lookback_minutes: 15
   step: "30s"
   timeout_seconds: 8

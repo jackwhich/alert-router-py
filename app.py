@@ -1,5 +1,12 @@
 """
 FastAPI 应用主入口
+
+职责：
+- HTTP 路由定义
+- 请求/响应处理
+- 应用生命周期管理
+
+业务逻辑已提取到 alert_router.service.AlertService
 """
 import json
 import logging
@@ -9,16 +16,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
-from adapters.alert_normalizer import normalize
-from alert_router.config import load_config
-from alert_router.jenkins_dedup import should_skip_jenkins_firing
-from alert_router.logging_config import setup_logging
-from alert_router.routing import route
-from requests.exceptions import HTTPError
-from alert_router.senders import send_telegram, send_webhook
-from alert_router.prometheus_plotter import generate_plot_from_generator_url
-from alert_router.grafana_plotter import generate_plot_from_grafana_generator_url
-from alert_router.template_renderer import render
+from alert_router.core.config import load_config
+from alert_router.core.logging_config import setup_logging
 
 # 加载配置（config 只读配置，不初始化日志）
 CONFIG, CHANNELS = load_config()
@@ -27,6 +26,10 @@ CONFIG, CHANNELS = load_config()
 setup_logging(**CONFIG["logging"])
 logger = logging.getLogger("alert-router")
 logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
+
+# 初始化服务实例（在应用启动时创建，避免重复加载配置）
+from alert_router.services.alert_service import AlertService
+_alert_service = AlertService(CONFIG, CHANNELS)
 
 
 @asynccontextmanager
@@ -51,9 +54,13 @@ async def lifespan(_app: FastAPI):
     logger.info("Alert Router 服务正在关闭...")
     logger.info("等待正在处理的请求完成...")
     
-    # 关闭 requests 会话（如果有的话）
-    # requests 库会自动管理连接池，这里主要是记录日志
-    logger.info("清理资源...")
+    # 关闭 requests 会话（清理连接池）
+    try:
+        from alert_router.senders.senders import clear_session_cache
+        clear_session_cache()
+        logger.info("已清理 HTTP 会话缓存")
+    except Exception as e:
+        logger.warning(f"清理 HTTP 会话缓存时出错: {e}")
     
     logger.info("Alert Router 服务已关闭")
     logger.info("=" * 60)
@@ -63,183 +70,16 @@ app = FastAPI(lifespan=lifespan, redirect_slashes=False)
 
 
 def _handle_webhook(payload: dict) -> dict:
-    """处理 webhook 请求逻辑"""
-    alerts = normalize(payload)
-    if not alerts:
-        logger.warning("无法解析告警数据格式")
-        return {"ok": False, "error": "无法解析告警数据格式"}
-
-    alert_summary = ", ".join(a.get("labels", {}).get("alertname", "?") for a in alerts)
-    logger.info(f"收到告警请求: {len(alerts)} 条 [{alert_summary}]")
-
-    results = []
-    for a in alerts:
-        labels = a.get("labels", {})
-        alertname = labels.get("alertname", "Unknown")
-        alert_status = a.get("status", "firing")
-
-        # Jenkins 告警在去重窗口内只发送一次 firing，抑制 Alertmanager 组更新导致的重复通知
-        if should_skip_jenkins_firing(a, labels, alert_status, CONFIG):
-            logger.info(f"告警 {alertname} 命中 Jenkins 去重窗口，跳过重复 firing 通知")
-            results.append(
-                {
-                    "alert": alertname,
-                    "skipped": "jenkins 去重窗口内重复 firing",
-                    "alert_status": alert_status,
-                }
-            )
-            continue
-
-        targets = route(labels, CONFIG)
-        logger.info(f"告警 {alertname} 路由到渠道: {targets}")
-
-        ctx = {
-            "title": f"{CONFIG['defaults']['title_prefix']} {alertname}",
-            "status": a.get("status"),
-            "labels": labels,
-            "annotations": a.get("annotations", {}),
-            "startsAt": a.get("startsAt"),
-            "endsAt": a.get("endsAt"),
-            "generatorURL": a.get("generatorURL"),
-        }
-
-        source = labels.get("_source")
-        image_bytes = None
-        if source == "prometheus":
-            image_cfg = CONFIG.get("prometheus_image", {}) or {}
-            image_enabled = image_cfg.get("enabled", True)
-            image_channels = []
-            for t in targets:
-                ch = CHANNELS.get(t)
-                if not ch or ch.type != "telegram" or not ch.enabled:
-                    continue
-                if alert_status == "resolved" and not ch.send_resolved:
-                    continue
-                if not ch.image_enabled:
-                    continue
-                image_channels.append(ch)
-            if image_enabled and image_channels:
-                # 根据配置决定是否使用代理
-                use_proxy = image_cfg.get("use_proxy", False)
-                plot_proxy = None
-                if use_proxy:
-                    # 如果启用代理，从渠道配置获取代理设置
-                    plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
-                prometheus_url = image_cfg.get("prometheus_url") or None
-                # 根据告警状态选择时间：firing 用 startsAt，resolved 用 endsAt
-                alert_time = a.get("endsAt") if alert_status == "resolved" else a.get("startsAt")
-                
-                image_bytes = generate_plot_from_generator_url(
-                    a.get("generatorURL", ""),
-                    prometheus_url=prometheus_url,
-                    proxies=plot_proxy,
-                    lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
-                    step=str(image_cfg.get("step", "30s")),
-                    timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
-                    max_series=int(image_cfg.get("max_series", 8)),
-                    alertname=alertname,
-                    alert_time=alert_time,
-                )
-                if image_bytes:
-                    logger.info(f"告警 {alertname} 已生成趋势图，将优先按图片发送 Telegram")
-                else:
-                    logger.info(f"告警 {alertname} 未生成趋势图，将按文本发送 Telegram")
-        elif source == "grafana":
-            image_cfg = CONFIG.get("grafana_image", {}) or {}
-            image_enabled = image_cfg.get("enabled", True)
-            image_channels = []
-            for t in targets:
-                ch = CHANNELS.get(t)
-                if not ch or ch.type != "telegram" or not ch.enabled:
-                    continue
-                if alert_status == "resolved" and not ch.send_resolved:
-                    continue
-                if not ch.image_enabled:
-                    continue
-                image_channels.append(ch)
-            if image_enabled and image_channels:
-                # 根据配置决定是否使用代理
-                use_proxy = image_cfg.get("use_proxy", False)
-                plot_proxy = None
-                if use_proxy:
-                    # 如果启用代理，从渠道配置获取代理设置
-                    plot_proxy = next((c.proxy for c in image_channels if c.proxy), None)
-                grafana_url = image_cfg.get("grafana_url") or None
-                prometheus_url = image_cfg.get("prometheus_url") or None
-                # 根据告警状态选择时间：firing 用 startsAt，resolved 用 endsAt
-                alert_time = a.get("endsAt") if alert_status == "resolved" else a.get("startsAt")
-                
-                image_bytes = generate_plot_from_grafana_generator_url(
-                    a.get("generatorURL", ""),
-                    grafana_url=grafana_url,
-                    prometheus_url=prometheus_url,
-                    proxies=plot_proxy,
-                    lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
-                    step=str(image_cfg.get("step", "30s")),
-                    timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
-                    max_series=int(image_cfg.get("max_series", 8)),
-                    alertname=alertname,
-                    alert_time=alert_time,
-                )
-                if image_bytes:
-                    logger.info(f"告警 {alertname} 已生成趋势图，将优先按图片发送 Telegram")
-                else:
-                    logger.info(f"告警 {alertname} 未生成趋势图，将按文本发送 Telegram")
-
-        sent_channels = []
-        for t in targets:
-            ch = CHANNELS.get(t)
-            if not ch:
-                error_msg = f"渠道不存在: {t}"
-                logger.warning(f"告警 {alertname}: {error_msg}")
-                results.append({"alert": alertname, "channel": t, "error": error_msg})
-                continue
-            if not ch.enabled:
-                logger.debug(f"告警 {alertname} 跳过已禁用的渠道: {t}")
-                results.append({"alert": alertname, "channel": t, "skipped": "渠道已禁用"})
-                continue
-            if alert_status == "resolved" and not ch.send_resolved:
-                logger.debug(f"告警 {alertname} 跳过 resolved 状态（渠道 {t} 配置为不发送 resolved）")
-                results.append({"alert": alertname, "channel": t, "skipped": "resolved 状态已禁用"})
-                continue
-            try:
-                body = render(ch.template, ctx)
-                logger.info(f"发送到渠道 [{t}] 的内容:\n{body}")
-                if ch.type == "telegram":
-                    # Prometheus 告警仅对 image_enabled=true 的 Telegram 渠道发送图片
-                    use_image = source == "prometheus" and ch.image_enabled and bool(image_bytes)
-                    if use_image:
-                        try:
-                            send_telegram(ch, body, photo_bytes=image_bytes)
-                        except Exception as img_err:
-                            logger.warning(
-                                f"告警 {alertname} 渠道 {t} 图片发送失败，自动回退文本发送: {img_err}"
-                            )
-                            send_telegram(ch, body)
-                    else:
-                        send_telegram(ch, body)
-                else:
-                    send_webhook(ch, body)
-                sent_channels.append(t)
-                results.append({"alert": alertname, "channel": t, "status": "sent", "alert_status": alert_status})
-            except Exception as e:
-                error_msg = str(e)
-                # 404/401/410 为 Webhook URL 配置问题，不打印堆栈，避免被误认为代码错误
-                is_config_error = (
-                    isinstance(e, HTTPError)
-                    and e.response is not None
-                    and e.response.status_code in (401, 404, 410)
-                )
-                if is_config_error:
-                    logger.warning(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}（请检查该渠道 Webhook URL 配置）")
-                else:
-                    logger.error(f"告警 {alertname} 发送到渠道 {t} 失败: {error_msg}", exc_info=True)
-                results.append({"alert": alertname, "channel": t, "error": error_msg})
-        if sent_channels:
-            channels_str = ", ".join(sent_channels)
-            logger.info(f"告警 {alertname} 已发送到 {len(sent_channels)} 个渠道: {channels_str} (状态: {alert_status})")
-
-    return {"ok": True, "sent": results}
+    """
+    处理 webhook 请求（委托给服务层）
+    
+    Args:
+        payload: Webhook 请求体
+        
+    Returns:
+        处理结果字典
+    """
+    return _alert_service.process_webhook(payload)
 
 
 @app.post("/webhook")
@@ -268,7 +108,7 @@ if __name__ == "__main__":
     # 直接启动入口（从 config.yaml 读取配置）
     import uvicorn
     
-    # 从配置读取服务器设置（必须配置）
+    # 从已加载的配置读取服务器设置（复用 CONFIG，避免重复加载）
     server_config = CONFIG.get("server", {})
     if not server_config:
         raise ValueError("config.yaml 中必须配置 server 节点")
