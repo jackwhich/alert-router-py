@@ -133,7 +133,7 @@ routing:
   - match:
       _source: "prometheus"
       _receiver: "prod_ebpay_jenkins_alarm"
-      alertname: "^(?!Jenkins|jenkins).*"
+      alertname: ".*Jenkins.*|.*jenkins.*"
     send_to: ["prometheus_telegram_jenkins"]
 
   # 告警来源 = Grafana（支持 critical 或 灾难）
