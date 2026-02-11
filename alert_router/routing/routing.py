@@ -8,6 +8,18 @@ from ..core.logging_config import get_logger
 
 logger = get_logger("alert-router")
 
+# 正则缓存，避免重复编译
+_REGEX_CACHE: Dict[str, re.Pattern] = {}
+
+
+def _regex_search(pattern: str, text: str) -> bool:
+    """带缓存的正则匹配"""
+    compiled = _REGEX_CACHE.get(pattern)
+    if compiled is None:
+        compiled = re.compile(pattern)
+        _REGEX_CACHE[pattern] = compiled
+    return compiled.search(text) is not None
+
 
 def match(labels: Dict[str, str], cond: Dict[str, str]) -> bool:
     """
@@ -61,7 +73,7 @@ def match(labels: Dict[str, str], cond: Dict[str, str]) -> bool:
                     # 直接使用正则表达式
                     pattern = v
                 
-                if not re.search(pattern, label_str):
+                if not _regex_search(pattern, label_str):
                     return False
             except re.error:
                 # 正则表达式错误，回退到精确匹配
@@ -88,12 +100,12 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
         List[str]: 渠道名称列表（去重）
     """
     channels = set()
-    default_channels = []
+    default_channels = None
     
     # 获取路由规则列表，如果不存在则返回空列表
     routing_rules = config.get("routing", [])
     if not routing_rules:
-        logger.warning("配置中未找到 routing 规则，返回空渠道列表")
+        logger.error("配置中未找到 routing 规则，告警将无法发送")
         return []
     
     # 先收集所有匹配的规则和默认规则
@@ -102,12 +114,18 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
             # 匹配的规则：添加到渠道集合
             channels.update(r["send_to"])
         elif r.get("default"):
-            # 默认规则：记录但不立即添加（最后添加）
-            default_channels = r["send_to"]
+            # 默认规则：仅保留第一个，避免多条 default 覆盖
+            if default_channels is None:
+                default_channels = r["send_to"]
+            else:
+                logger.warning("发现多个 default 规则，仅使用第一个默认规则")
     
     # 默认渠道：仅当「完全没匹配到任何规则」时使用（兜底）
     # 有匹配的规则时，不再叠加 default，由各 match 规则自行包含「默认渠道」
-    if not channels and default_channels:
-        channels.update(default_channels)
+    if not channels:
+        if default_channels:
+            channels.update(default_channels)
+        else:
+            logger.warning("未找到匹配规则且无默认规则，告警将无法发送")
     
     return list(channels)

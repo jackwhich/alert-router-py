@@ -11,82 +11,12 @@
 时间: {{ startsAt }}
 
 {% for key, value in labels.items() -%}
-{% if key not in ['prometheus', 'id', 'image', 'uid', 'metrics_path', 'endpoint', 'job', 'service', 'name', '_source', '_receiver', 'replicas', 'pods', '_pod_values', '_entity_values', 'instances', 'service_names', 'consumergroups', 'topics', 'jenkins_jobs', 'devices', 'containers', 'build_numbers'] -%}
+{% if value is sequence and (value is not string) -%}
+{{ key }}: {{ value | unique | sort | join(', ') }}
+{%- else -%}
 {{ key }}: {{ value }}
-{% endif %}
-{% endfor %}
-
-{# 显示所有实体类型及其值 #}
-{% set entity_values = labels.get('_entity_values', {}) %}
-{% if entity_values -%}
-{# Pod 实体 #}
-{% if labels.get('pods') -%}
-{% for pod in (labels.pods | unique | sort) -%}
-pod: {{ pod }}{% if entity_values.get('pod:' + pod) %} (值: {{ entity_values.get('pod:' + pod) }}){% endif %}
-{% endfor %}
-{% endif %}
-{# Instance 实体（Node Exporter, Nginx等） #}
-{% if labels.get('instances') -%}
-{% for instance in (labels.instances | unique | sort) -%}
-instance: {{ instance }}{% if entity_values.get('instance:' + instance) %} (值: {{ entity_values.get('instance:' + instance) }}){% endif %}
-{% endfor %}
-{% endif %}
-{# Service Name 实体（RPC服务） #}
-{% if labels.get('service_names') -%}
-{% for service_name in (labels.service_names | unique | sort) -%}
-service_name: {{ service_name }}{% if entity_values.get('service_name:' + service_name) %} (值: {{ entity_values.get('service_name:' + service_name) }}){% endif %}
-{% endfor %}
-{% endif %}
-{# Kafka 消费组 #}
-{% if labels.get('consumergroups') -%}
-{% for consumergroup in (labels.consumergroups | unique | sort) -%}
-consumergroup: {{ consumergroup }}{% if entity_values.get('consumergroup:' + consumergroup) %} (值: {{ entity_values.get('consumergroup:' + consumergroup) }}){% endif %}
-{% endfor %}
-{% endif %}
-{# Kafka 主题 #}
-{% if labels.get('topics') -%}
-{% for topic in (labels.topics | unique | sort) -%}
-topic: {{ topic }}{% if entity_values.get('topic:' + topic) %} (值: {{ entity_values.get('topic:' + topic) }}){% endif %}
-{% endfor %}
-{% endif %}
-{# Jenkins 任务 #}
-{% if labels.get('jenkins_jobs') -%}
-{% for jenkins_job in (labels.jenkins_jobs | unique | sort) -%}
-jenkins_job: {{ jenkins_job }}{% if entity_values.get('jenkins_job:' + jenkins_job) %} (值: {{ entity_values.get('jenkins_job:' + jenkins_job) }}){% endif %}
-{% endfor %}
-{% endif %}
-{# Device 实体（磁盘等） #}
-{% if labels.get('devices') -%}
-{% for device in (labels.devices | unique | sort) -%}
-device: {{ device }}{% if entity_values.get('device:' + device) %} (值: {{ entity_values.get('device:' + device) }}){% endif %}
-{% endfor %}
-{% endif %}
-{# Container 实体 #}
-{% if labels.get('containers') -%}
-{% for container in (labels.containers | unique | sort) -%}
-container: {{ container }}{% if entity_values.get('container:' + container) %} (值: {{ entity_values.get('container:' + container) }}){% endif %}
-{% endfor %}
-{% endif %}
-{# Replica 实体 #}
-{% if labels.get('replicas') -%}
-replica: {{ (labels.replicas | unique | sort) | join(', ') }}
-{% endif %}
-{%- else -%}
-{# 如果没有 entity_values，使用旧的显示方式（向后兼容） #}
-{% if labels.get('pods') -%}
-{% set pod_values = labels.get('_pod_values', {}) %}
-{% if pod_values -%}
-{% for pod in (labels.pods | unique | sort) -%}
-pod: {{ pod }}{% if pod_values.get('pod:' + pod) %} (值: {{ pod_values.get('pod:' + pod) }}){% endif %}
-{% endfor %}
-{%- else -%}
-pod: {{ (labels.pods | unique | sort) | join(', ') }}
 {%- endif %}
-{% endif %}
-{% if labels.get('replicas') -%}
-replica: {{ (labels.replicas | unique | sort) | join(', ') }}
-{% endif %}
-{% endif %}
+{% endfor %}
 
 {% if annotations.summary -%}
 summary: {{ annotations.summary }}
