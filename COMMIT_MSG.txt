@@ -1,7 +1,0 @@
-修复模板输出换行不稳定问题
-
-本次提交包含以下调整：
-
-## 模板输出
-- prometheus_telegram.html.j2: labels 每行强制添加 <br>
-- grafana_telegram.html.j2: labels 每行强制添加 <br>
