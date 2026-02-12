@@ -25,7 +25,11 @@ CONFIG, CHANNELS = load_config()
 # logging 配置由 config.yaml 提供并在 load_config 中完成完整性校验
 setup_logging(**CONFIG["logging"])
 logger = logging.getLogger("alert-router")
-logger.info(f"配置加载完成，共 {len(CHANNELS)} 个渠道")
+log_cfg = CONFIG["logging"]
+logger.info(
+    f"配置加载完成，共 {len(CHANNELS)} 个渠道；"
+    f"日志: level={log_cfg.get('level', 'INFO')}, 文件={log_cfg.get('log_dir', 'logs')}/{log_cfg.get('log_file', 'alert-router.log')}"
+)
 
 # 初始化服务实例（在应用启动时创建，避免重复加载配置）
 from alert_router.services.alert_service import AlertService
@@ -86,18 +90,21 @@ def _handle_webhook(payload: dict) -> dict:
 async def webhook(req: Request):
     """接收告警 Webhook 并路由分发（请使用 /webhook 无尾斜杠，避免 307）"""
     request_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{request_id}] [Webhook 入口] 收到 POST /webhook")
     try:
         payload = await req.json()
-        # 打印完整的接收数据
-        raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
-        logger.info(f"[{request_id}] 接收到的完整 Webhook 数据:\n{raw_preview}")
         status = payload.get("status")
         alerts_count = len(payload.get("alerts", [])) if payload.get("alerts") else 0
-        logger.info(f"[{request_id}] Webhook 收到 (status={status}, alerts={alerts_count})")
+        logger.info(f"[{request_id}] [接收数据] status={status}, alerts={alerts_count}")
+        raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
+        logger.info(f"[{request_id}] [接收数据] 完整 Webhook 负载:\n{raw_preview}")
 
         result = _handle_webhook(payload)
-        if not result.get("ok"):
-            logger.warning(f"[{request_id}] Webhook 处理结果异常: {result}")
+        ok = result.get("ok", False)
+        sent = result.get("sent", [])
+        logger.info(f"[{request_id}] [Webhook 完成] ok={ok}, 发送结果数={len(sent)}")
+        if not ok:
+            logger.warning(f"[{request_id}] [Webhook 完成] 处理结果异常: {result}")
         return result
     except json.JSONDecodeError as e:
         logger.warning(f"[{request_id}] JSON 解析失败: {e}")

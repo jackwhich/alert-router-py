@@ -52,7 +52,7 @@ class AlertService:
             return {"ok": False, "error": "无法解析告警数据格式"}
 
         alert_summary = ", ".join(a.get("labels", {}).get("alertname", "?") for a in alerts)
-        logger.info(f"收到告警请求: {len(alerts)} 条 [{alert_summary}]")
+        logger.info(f"[处理] 收到告警请求: {len(alerts)} 条 [{alert_summary}]")
 
         results = []
         for alert in alerts:
@@ -93,7 +93,7 @@ class AlertService:
         if receiver:
             match_labels["_receiver"] = receiver
         target_channels = route(match_labels, self.config)
-        logger.info(f"告警 {alertname} 路由到渠道: {target_channels}")
+        logger.info(f"[处理] 告警 {alertname} 路由到渠道: {target_channels}")
 
         # 构建模板上下文
         ctx = self._build_template_context(alert, labels)
@@ -115,9 +115,11 @@ class AlertService:
             )
 
         # 发送到各个渠道（无图时自动走纯文本）
+        send_mode = "图片+文本" if image_bytes else "纯文本"
+        logger.info(f"[发送] 告警 {alertname} 将向 {len(target_channels)} 个渠道发送 (方式: {send_mode})")
         results = []
         sent_channels = []
-        
+
         for channel_name in target_channels:
             result = self._send_to_channel(
                 channel_name=channel_name,
@@ -136,9 +138,12 @@ class AlertService:
         if sent_channels:
             channels_str = ", ".join(sent_channels)
             logger.info(
-                f"告警 {alertname} 已发送到 {len(sent_channels)} 个渠道: "
+                f"[发送] 告警 {alertname} 已发送到 {len(sent_channels)} 个渠道: "
                 f"{channels_str} (状态: {alert_status})"
             )
+        for r in results:
+            if r.get("error"):
+                logger.warning(f"[发送] 告警 {alertname} 渠道 {r.get('channel')} 失败: {r.get('error')}")
 
         return results
     
@@ -214,17 +219,20 @@ class AlertService:
         try:
             # 渲染模板
             body = render(channel.template, ctx)
-            logger.info(f"发送到渠道 [{channel_name}] 的内容:\n{body}")
+            use_image = (
+                channel.type == "telegram"
+                and source == "prometheus"
+                and channel.image_enabled
+                and bool(image_bytes)
+            )
+            logger.info(
+                f"[发送] 告警 {alertname} -> 渠道 [{channel_name}] "
+                f"(方式: {'图片+文本' if use_image else '纯文本'}), 内容长度={len(body)}"
+            )
+            logger.info(f"[发送] 渠道 [{channel_name}] 将发送的内容:\n{body}")
 
             # 发送消息
             if channel.type == "telegram":
-                # 判断是否使用图片发送
-                use_image = (
-                    source == "prometheus"
-                    and channel.image_enabled
-                    and bool(image_bytes)
-                )
-                
                 if use_image:
                     try:
                         send_telegram(channel, body, photo_bytes=image_bytes)
