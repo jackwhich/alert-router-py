@@ -19,6 +19,9 @@ from ..core.models import Channel
 
 logger = get_logger("alert-router")
 
+# PNG 文件头魔数，用于校验趋势图是否为有效 PNG
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
 # 超时配置（秒）
 TIMEOUTS = {
     "telegram_photo": 15,
@@ -114,8 +117,13 @@ def send_telegram(
     caption = text_safe[:1024]
     message_text = text_safe[:4096]
 
-    # 优先发送图片（caption 最大 1024）；图片过小或无效时改为发文本，避免 400
-    if photo_bytes and len(photo_bytes) >= 100:
+    # 仅当图片有效时发图：长度足够且为 PNG 魔数，否则 Telegram 会 400
+    photo_ok = (
+        photo_bytes
+        and len(photo_bytes) >= 100
+        and photo_bytes[: len(_PNG_SIGNATURE)] == _PNG_SIGNATURE
+    )
+    if photo_ok:
         url = f"https://api.telegram.org/bot{ch.bot_token}/sendPhoto"
         payload = {
             "chat_id": ch.chat_id,
@@ -155,6 +163,22 @@ def send_telegram(
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
         return response
+    except requests.exceptions.HTTPError as e:
+        # 400 且使用了 parse_mode 时，可能是 HTML 解析错误，用纯文本重试一次
+        if (
+            e.response is not None
+            and e.response.status_code == 400
+            and parse_mode
+        ):
+            logger.warning(
+                f"Telegram 返回 400 (渠道: {ch.name})，尝试以纯文本重发（去掉 parse_mode）"
+            )
+            try:
+                return send_telegram(ch, message_text, parse_mode=None, photo_bytes=None)
+            except requests.exceptions.RequestException:
+                pass
+        _log_telegram_error(ch.name, e)
+        raise
     except requests.exceptions.RequestException as e:
         _log_telegram_error(ch.name, e)
         raise

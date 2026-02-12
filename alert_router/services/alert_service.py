@@ -98,16 +98,23 @@ class AlertService:
         # 构建模板上下文
         ctx = self._build_template_context(alert, labels)
 
-        # 生成图片（如果需要）
-        image_bytes = self.image_service.generate_image(
-            source=source,
-            alert=alert,
-            alert_status=alert_status,
-            target_channels=target_channels,
-            alertname=alertname,
-        )
+        # 生成图片（如果需要）；失败或异常时仍发告警，仅不发图
+        image_bytes = None
+        try:
+            image_bytes = self.image_service.generate_image(
+                source=source,
+                alert=alert,
+                alert_status=alert_status,
+                target_channels=target_channels,
+                alertname=alertname,
+            )
+        except Exception as img_err:
+            logger.warning(
+                f"告警 {alertname} 趋势图生成异常，将仅发送文本: {img_err}",
+                exc_info=True,
+            )
 
-        # 发送到各个渠道
+        # 发送到各个渠道（无图时自动走纯文本）
         results = []
         sent_channels = []
         
