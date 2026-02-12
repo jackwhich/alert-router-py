@@ -174,7 +174,8 @@ def send_telegram(
                 f"Telegram 返回 400 (渠道: {ch.name})，尝试以纯文本重发（去掉 parse_mode）"
             )
             try:
-                return send_telegram(ch, message_text, parse_mode=None, photo_bytes=None)
+                # 传空字符串表示强制纯文本，避免再次根据模板填成 HTML 导致循环 400
+                return send_telegram(ch, message_text, parse_mode="", photo_bytes=None)
             except requests.exceptions.RequestException:
                 pass
         _log_telegram_error(ch.name, e)
