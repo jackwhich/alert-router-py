@@ -109,11 +109,14 @@ def send_telegram(
     if parse_mode is None and ch.template:
         parse_mode = detect_template_format(ch.template)
 
-    # 优先发送图片（caption 最大 1024）
-    if photo_bytes:
+    # 文本限制：caption 最大 1024，message 最大 4096，且不能为空
+    text_safe = (text or "").strip() or " "
+    caption = text_safe[:1024]
+    message_text = text_safe[:4096]
+
+    # 优先发送图片（caption 最大 1024）；图片过小或无效时改为发文本，避免 400
+    if photo_bytes and len(photo_bytes) >= 100:
         url = f"https://api.telegram.org/bot{ch.bot_token}/sendPhoto"
-        # 确保 text 不为 None，如果为 None 则使用空字符串
-        caption = (text or "")[:1024]
         payload = {
             "chat_id": ch.chat_id,
             "caption": caption,
@@ -129,7 +132,7 @@ def send_telegram(
         url = f"https://api.telegram.org/bot{ch.bot_token}/sendMessage"
         payload = {
             "chat_id": ch.chat_id,
-            "text": text,
+            "text": message_text,
             "disable_web_page_preview": True,
         }
         if parse_mode:
@@ -153,7 +156,7 @@ def send_telegram(
             logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
         return response
     except requests.exceptions.RequestException as e:
-        _log_send_error("Telegram", ch.name, e)
+        _log_telegram_error(ch.name, e)
         raise
 
 
@@ -223,6 +226,19 @@ def _post_webhook(
 
 def _log_send_error(channel_type: str, channel_name: str, error: Exception):
     logger.error(f"发送 {channel_type} 消息失败 (渠道: {channel_name}): {error}")
+
+
+def _log_telegram_error(channel_name: str, error: Exception):
+    """记录 Telegram 发送失败，并输出 API 返回的 description 便于排查 400/401 等."""
+    logger.error(f"发送 Telegram 消息失败 (渠道: {channel_name}): {error}")
+    if isinstance(error, requests.exceptions.HTTPError) and error.response is not None:
+        try:
+            body = error.response.json()
+            desc = body.get("description", body.get("error", error.response.text))
+            logger.error(f"Telegram API 响应说明: {desc}")
+        except Exception:
+            if error.response.text:
+                logger.error(f"Telegram API 原始响应: {error.response.text[:500]}")
 
 
 def _log_webhook_error(channel_name: str, e: requests.exceptions.RequestException):
