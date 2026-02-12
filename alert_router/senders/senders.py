@@ -154,12 +154,15 @@ def send_telegram(
     session = _get_session(proxy=ch.proxy)
     
     try:
-        logger.info(f"发送 Telegram 消息到渠道 [{ch.name}]，URL: {url}")
+        method = "sendPhoto" if photo_ok else "sendMessage"
+        logger.info(
+            f"[Telegram] 渠道 [{ch.name}] 请求: {method}, chat_id={ch.chat_id}, parse_mode={parse_mode or '(无)'}"
+        )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"发送 Telegram 消息的完整 payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
         response = session.post(url, **kwargs)
         response.raise_for_status()
-        logger.info(f"Telegram 消息发送成功 (渠道: {ch.name})，响应状态码: {response.status_code}")
+        logger.info(f"[Telegram] 渠道 [{ch.name}] 发送成功, 状态码: {response.status_code}")
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
         return response
