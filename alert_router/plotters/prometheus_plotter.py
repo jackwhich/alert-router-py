@@ -513,12 +513,29 @@ def generate_plot_from_generator_url(
         payload = response.json()
         data = payload.get("data", {})
         result = data.get("result", [])
+        
+        # DEBUG: 打印查询结果中的标签，辅助排查为什么 status 不显示
+        if result:
+            first_metric = result[0].get("metric", {})
+            logger.info(f"[图表调试] Prometheus 返回了 {len(result)} 条曲线")
+            logger.info(f"[图表调试] 第一条曲线的原始标签: {first_metric}")
+            logger.info(f"[图表调试] 使用的图例白名单: {legend_label_whitelist}")
+            
         if payload.get("status") != "success" or not isinstance(result, list) or not result:
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
             return None
 
         # 按告警 labels 过滤，只画与当前告警目标一致的曲线（如图只显示 /dev/sdb1 /data 而非全部 tmpfs）
+        if alert_labels:
+            logger.info(f"[图表调试] 正在按告警标签过滤: {alert_labels}")
+        
         result = _filter_result_by_alert_labels(result, alert_labels)
+        
+        if result:
+            logger.info(f"[图表调试] 过滤后剩余 {len(result)} 条曲线")
+            if result:
+                 logger.info(f"[图表调试] 过滤后第一条曲线标签: {result[0].get('metric', {})}")
+
         if result and len(result) > max_series:
             result = result[:max_series]
 

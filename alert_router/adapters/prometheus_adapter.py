@@ -62,6 +62,7 @@ def _build_entity_values(raw_alerts: List[Dict[str, Any]]) -> Dict[str, str]:
         "container",     # 容器名
         "namespace",     # 命名空间
         "name",          # 通用名称（Kafka等）
+        "status",        # 状态码（如 Nginx status）
     ]
     
     for alert in raw_alerts:
@@ -171,6 +172,7 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "device",         # 设备名（磁盘等）
             "container",      # 容器名
             "build_number",   # Jenkins构建号
+            "status",         # 状态码（如 Nginx status）
         ]
         
         # 共同 label：仅保留在所有条中取值相同的键（可收集的标签用下面的列表）
