@@ -85,6 +85,36 @@ def _get_cjk_font_family() -> Optional[str]:
                 break
         except Exception:
             continue
+
+    # Linux：matplotlib 字体缓存可能未包含新安装的字体，用 fc-list 取路径后按文件加载
+    if not chosen and system == "Linux":
+        try:
+            out = subprocess.run(
+                ["fc-list", "-f", "%{file}\n", ":lang=zh"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if out.returncode == 0 and out.stdout:
+                paths = [p.strip() for p in out.stdout.strip().splitlines() if p.strip()]
+                font_manager = getattr(fm, "fontManager", None)
+                if font_manager is not None and hasattr(font_manager, "addfont"):
+                    for font_path in paths:
+                        if "wqy" in font_path.lower() or "noto" in font_path.lower() or "cjk" in font_path.lower():
+                            try:
+                                font_manager.addfont(font_path)
+                                for f in font_manager.ttflist:
+                                    if getattr(f, "fname", None) == font_path:
+                                        chosen = getattr(f, "name", None) or ""
+                                        if chosen:
+                                            break
+                                if chosen:
+                                    break
+                            except Exception:
+                                continue
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+            pass
+
     if chosen:
         _cjk_font_family_cache = chosen
         return chosen
@@ -93,7 +123,8 @@ def _get_cjk_font_family() -> Optional[str]:
         _get_cjk_font_family._warned = True
         logger.warning(
             "未检测到中文字体，趋势图中文可能显示为方框。"
-            "Linux 可安装: apt-get install fonts-wqy-microhei 或 fonts-noto-cjk"
+            "Linux 可安装: apt-get install fonts-wqy-microhei 或 fonts-noto-cjk；"
+            "若已安装仍报错可尝试: rm -rf ~/.cache/matplotlib 后重启进程"
         )
     return None
 
@@ -123,11 +154,16 @@ except ImportError:
 _ALERT_ONLY_LABELS = {"alertname", "severity", "cluster", "_source", "_receiver"}
 
 # 图例标签白名单：仅在此列表中的 label 会显示在图例中，便于统一控制（可在 config 中覆盖）
-# 来源于告警规则常见维度：pod/container、device/mountpoint/fstype、instance、Kafka/RPC/Jenkins 等
+# 与 config 默认一致，含 nginx status、server_name 等，避免未加载 config 时图例缺项
 DEFAULT_LEGEND_LABEL_WHITELIST = (
-    "pod", "container", "device", "mountpoint", "fstype", "instance",
-    "topic", "consumergroup", "service_name", "jenkins_job", "build_number",
-    "name", "endpoint", "node",
+    "pod", "container", "device", "mountpoint", "fstype", "instance", "node",
+    "topic", "consumergroup", "name", "address",
+    "group", "broker", "brokerIP", "cluster", "env",
+    "service_name", "endpoint", "application",
+    "jenkins_job", "build_number",
+    "server_name", "status", "uri", "request_uri", "remote_addr", "url",
+    "namespace", "alertmanager", "remote_name", "controller", "resource",
+    "service", "kubernetes_namespace",
 )
 
 
