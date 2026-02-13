@@ -376,12 +376,12 @@ def _generate_plot_with_plotly(
                 bordercolor='rgba(255, 255, 255, 0.3)',
                 borderwidth=1,
                 font=dict(size=12, color='#ffffff', family=plot_font_family),
-                x=1.02,
+                x=0.92,
                 y=0.5,
                 xanchor='left',
                 yanchor='middle',
             ),
-            margin=dict(l=60, r=200, t=80, b=60),
+            margin=dict(l=60, r=220, t=80, b=60),
             width=1400,
             height=700,
             hovermode='x unified',
@@ -585,6 +585,9 @@ def generate_plot_from_generator_url(
                 series.get("metric") or {},
                 legend_label_whitelist=legend_label_whitelist,
             )
+            # 确保 label 非空，避免图例不显示
+            if not label or not label.strip():
+                label = series.get("metric", {}).get("__name__", f"series_{idx}")
             # 使用模运算确保颜色索引不越界
             color = colors[idx % len(colors)]
             # 绘制数据线 - 更粗更明显
@@ -717,7 +720,9 @@ def generate_plot_from_generator_url(
         ax.imshow(Z, extent=[x_min, x_max, y_min, y_max], 
                   aspect='auto', cmap=cmap, alpha=0.3, zorder=0, origin='lower')
         
-        # 预留右侧约 22% 给图例，避免 tight_layout 把图例挤出画布导致不显示
+        # 先手动调整布局预留右侧空间给图例（更可靠）
+        fig.subplots_adjust(right=0.78)
+        # 再调用 tight_layout，但 rect 限制在 0-0.78 范围内，确保图例空间不被占用
         fig.tight_layout(pad=3.5, rect=[0, 0, 0.78, 1])
 
         buffer = BytesIO()
