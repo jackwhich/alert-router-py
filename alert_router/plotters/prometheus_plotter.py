@@ -10,10 +10,13 @@ Prometheus 趋势图生成模块
 """
 from __future__ import annotations
 
+import platform
+import subprocess
+import warnings
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 import matplotlib
@@ -24,8 +27,87 @@ from ..core.logging_config import get_logger
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib import font_manager as fm  # noqa: E402
 
 logger = get_logger("alert-router")
+
+# 各平台优先使用的中文字体（按顺序尝试，第一个可用即用）
+_CJK_FONT_CANDIDATES: Dict[str, List[str]] = {
+    "Darwin": ["PingFang SC", "STHeiti", "Arial Unicode MS", "Heiti SC", "Arial"],
+    "Linux": [
+        "WenQuanYi Micro Hei",
+        "WenQuanYi Zen Hei",
+        "Noto Sans CJK SC",
+        "Noto Sans SC",
+        "Droid Sans Fallback",
+        "AR PL UMing CN",
+        "DejaVu Sans",
+    ],
+    "Windows": ["Microsoft YaHei", "SimHei", "DengXian", "Arial"],
+}
+
+# 缓存检测到的中文字体名，供 matplotlib 与 Plotly 共用
+_cjk_font_family_cache: Optional[str] = None
+
+
+def _get_cjk_font_family() -> Optional[str]:
+    """返回当前系统可用的中文字体 family 名称（供 matplotlib / Plotly 使用）。"""
+    global _cjk_font_family_cache
+    # 已计算过：None=未计算，''=无可用字体，非空=字体名
+    if _cjk_font_family_cache is not None:
+        return _cjk_font_family_cache if _cjk_font_family_cache else None
+    system = platform.system()
+    candidates: List[str] = list(_CJK_FONT_CANDIDATES.get(system, _CJK_FONT_CANDIDATES["Linux"]))
+    # Linux 下用 fc-list 发现系统已安装的中文语言字体，优先使用
+    if system == "Linux":
+        try:
+            out = subprocess.run(
+                ["fc-list", "-f", "%{family}\n", ":lang=zh"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if out.returncode == 0 and out.stdout:
+                for line in out.stdout.strip().splitlines():
+                    name = line.strip().split(",")[0].strip()  # 取第一个 family
+                    if name and name not in candidates:
+                        candidates.insert(0, name)
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+            pass
+    chosen: Optional[str] = None
+    for name in candidates:
+        if not name or name == "DejaVu Sans":
+            continue
+        try:
+            path = fm.findfont(fm.FontProperties(family=name), fallback_to_default=False)
+            if path and "DejaVu" not in path:
+                chosen = name
+                break
+        except Exception:
+            continue
+    if chosen:
+        _cjk_font_family_cache = chosen
+        return chosen
+    _cjk_font_family_cache = ""  # 标记已计算且无可用字体
+    if not getattr(_get_cjk_font_family, "_warned", False):
+        _get_cjk_font_family._warned = True
+        logger.warning(
+            "未检测到中文字体，趋势图中文可能显示为方框。"
+            "Linux 可安装: apt-get install fonts-wqy-microhei 或 fonts-noto-cjk"
+        )
+    return None
+
+
+def _setup_matplotlib_cjk_font() -> None:
+    """设置 matplotlib 使用支持中文的字体，避免 'Glyph missing from font' 警告与方框。"""
+    chosen = _get_cjk_font_family()
+    if chosen:
+        plt.rcParams["font.sans-serif"] = [chosen]
+    else:
+        system = platform.system()
+        candidates = _CJK_FONT_CANDIDATES.get(system, _CJK_FONT_CANDIDATES["Linux"])
+        plt.rcParams["font.sans-serif"] = candidates
+    plt.rcParams["axes.unicode_minus"] = False
 
 # 尝试导入 Plotly（可选，如果未安装则使用 matplotlib）
 try:
@@ -170,17 +252,19 @@ def _generate_plot_with_plotly(
         else:
             xlabel_text = "Time (UTC+8)"
         
+        # 使用检测到的中文字体，避免标题/图例中文显示为方框
+        plot_font_family = _get_cjk_font_family() or "Arial, sans-serif"
         # 更新布局 - 使用深色主题，更现代
         fig.update_layout(
             title=dict(
                 text=chart_title,
-                font=dict(size=24, color='#ffffff', family='Arial, sans-serif'),
+                font=dict(size=24, color='#ffffff', family=plot_font_family),
                 x=0.5,
                 xanchor='center',
             ),
             xaxis=dict(
                 title=dict(text=xlabel_text, font=dict(size=14, color='#ffffff')),
-                tickfont=dict(size=11, color='#ffffff'),
+                tickfont=dict(size=11, color='#ffffff', family=plot_font_family),
                 gridcolor='rgba(255, 255, 255, 0.2)',
                 gridwidth=1,
                 showgrid=True,
@@ -188,7 +272,7 @@ def _generate_plot_with_plotly(
             ),
             yaxis=dict(
                 title="",
-                tickfont=dict(size=12, color='#ffffff'),
+                tickfont=dict(size=12, color='#ffffff', family=plot_font_family),
                 gridcolor='rgba(255, 255, 255, 0.2)',
                 gridwidth=1,
                 showgrid=True,
@@ -196,12 +280,12 @@ def _generate_plot_with_plotly(
             ),
             plot_bgcolor='#0a0a0f',
             paper_bgcolor='#0a0a0f',
-            font=dict(family='Arial, sans-serif'),
+            font=dict(family=plot_font_family),
             legend=dict(
                 bgcolor='rgba(26, 26, 46, 0.95)',
                 bordercolor='rgba(255, 255, 255, 0.3)',
                 borderwidth=1,
-                font=dict(size=12, color='#ffffff'),
+                font=dict(size=12, color='#ffffff', family=plot_font_family),
                 x=1.02,
                 y=0.5,
                 xanchor='left',
@@ -328,18 +412,16 @@ def generate_plot_from_generator_url(
             logger.info("Plotly 出图失败，回退到 matplotlib")
 
         # 使用 Matplotlib 生成图表（备选方案）
+        _setup_matplotlib_cjk_font()
+        # 无 CJK 字体时抑制 "Glyph xxx missing from font" 刷屏（savefig 时触发）
+        warnings.filterwarnings(
+            "ignore",
+            message=".*Glyph.*missing from font",
+            category=UserWarning,
+            module="matplotlib",
+        )
         # 创建图表 - 使用更大的尺寸
         fig, ax = plt.subplots(figsize=(14, 7), dpi=150)
-        
-        # 设置中文字体支持
-        import platform
-        if platform.system() == 'Darwin':  # macOS
-            plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'PingFang SC', 'STHeiti', 'Arial']
-        elif platform.system() == 'Linux':
-            plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'DejaVu Sans', 'Liberation Sans']
-        else:  # Windows
-            plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial']
-        plt.rcParams['axes.unicode_minus'] = False
         
         plotted = 0
         # 使用更鲜艳、对比度更好的颜色方案
