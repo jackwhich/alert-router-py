@@ -717,8 +717,8 @@ def generate_plot_from_generator_url(
         ax.imshow(Z, extent=[x_min, x_max, y_min, y_max], 
                   aspect='auto', cmap=cmap, alpha=0.3, zorder=0, origin='lower')
         
-        # 确保图表紧凑但不会裁剪内容；图例在右侧，bbox_extra_artists 避免被 tight 裁掉
-        fig.tight_layout(pad=3.5)
+        # 预留右侧约 22% 给图例，避免 tight_layout 把图例挤出画布导致不显示
+        fig.tight_layout(pad=3.5, rect=[0, 0, 0.78, 1])
 
         buffer = BytesIO()
         fig.savefig(
