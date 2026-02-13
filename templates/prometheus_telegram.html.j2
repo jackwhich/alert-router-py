@@ -1,4 +1,4 @@
-📊 来源: {% if labels._source == 'grafana' %}Grafana{% else %}Prometheus{% endif %}
+📊 来源: {% if (labels or {}).get('_source') == 'grafana' %}Grafana{% else %}Prometheus{% endif %}
 
 
 {% if status == "firing" -%}
@@ -10,7 +10,7 @@
 
 时间: {{ startsAt | e }}
 
-{% for key, value in labels.items() %}
+{% for key, value in (labels or {}).items() %}
 {% if value is sequence and (value is not string) %}
 {{ key | e }}: {{ (value | unique | sort | join(', ')) | e }}<br>
 {% else %}
@@ -18,6 +18,6 @@
 {% endif %}
 {% endfor %}
 
-{% if annotations.summary -%}
-summary: {{ annotations.summary | e }}
+{% if (annotations or {}).summary -%}
+summary: {{ (annotations or {}).summary | e }}
 {%- endif %}

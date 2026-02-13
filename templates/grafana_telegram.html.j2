@@ -8,7 +8,7 @@
 
 
 时间:  {{ startsAt | e }}
-{% for key, value in labels.items() %}
+{% for key, value in (labels or {}).items() %}
 {% if value is sequence and (value is not string) %}
 {{ key | e }}: {{ (value | unique | sort | join(', ')) | e }}<br>
 {% else %}
@@ -16,9 +16,9 @@
 {% endif %}
 {% endfor %}
 
-{% if annotations.get('当前值') -%}
-当前值: {{ annotations.当前值 | e }}
+{% if (annotations or {}).get('当前值') -%}
+当前值: {{ (annotations or {}).get('当前值', '') | e }}
 {% endif %}
-{% if annotations.summary -%}
-summary: {{ annotations.summary | e }}
+{% if (annotations or {}).summary -%}
+summary: {{ (annotations or {}).summary | e }}
 {%- endif %}
