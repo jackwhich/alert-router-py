@@ -8,16 +8,16 @@
 {% endif %}
 
 
-时间: {{ startsAt }}
+时间: {{ startsAt | e }}
 
 {% for key, value in labels.items() %}
 {% if value is sequence and (value is not string) %}
-{{ key }}: {{ value | unique | sort | join(', ') }}<br>
+{{ key | e }}: {{ (value | unique | sort | join(', ')) | e }}<br>
 {% else %}
-{{ key }}: {{ value }}<br>
+{{ key | e }}: {{ value | e }}<br>
 {% endif %}
 {% endfor %}
 
 {% if annotations.summary -%}
-summary: {{ annotations.summary }}
+summary: {{ annotations.summary | e }}
 {%- endif %}
