@@ -112,6 +112,10 @@ def send_telegram(
     if parse_mode is None and ch.template:
         parse_mode = detect_template_format(ch.template)
 
+    # 纯文本模式下把模板里的 <br> 转为换行，避免在 Telegram 里显示成字面 "<br>"
+    if parse_mode == "":
+        text = (text or "").replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+
     # 文本限制：caption 最大 1024，message 最大 4096，且不能为空
     text_safe = (text or "").strip() or " "
     caption = text_safe[:1024]
@@ -184,8 +188,10 @@ def send_telegram(
                 f"Telegram 返回 400 (渠道: {ch.name})，尝试以纯文本重发（去掉 parse_mode），保留图片"
             )
             try:
-                # 传空字符串表示强制纯文本，避免再次根据模板填成 HTML 导致循环 400；保留 photo_bytes 以便仍发图
-                return send_telegram(ch, message_text, parse_mode="", photo_bytes=photo_bytes)
+                # 纯文本下把 <br> 转为换行，避免在 Telegram 里显示成字面 "<br>"
+                text_plain = message_text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+                # 传空字符串表示强制纯文本；保留 photo_bytes 以便仍发图
+                return send_telegram(ch, text_plain, parse_mode="", photo_bytes=photo_bytes)
             except requests.exceptions.RequestException:
                 pass
         _log_telegram_error(ch.name, e)
