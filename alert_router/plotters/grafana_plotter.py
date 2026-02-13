@@ -31,7 +31,7 @@ def _build_series_label(metric: Dict[str, str]) -> str:
         return "series"
     pairs = []
     # 排除的标签：不需要在图例中显示
-    exclude_keys = {"__name__", "replica", "prometheus", "job", "instance"}
+    exclude_keys = {"__name__", "replica", "prometheus", "job", "instance", "namespace"}
     for k in sorted(metric.keys()):
         if k in exclude_keys:
             continue
