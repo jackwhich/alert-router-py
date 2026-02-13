@@ -210,8 +210,13 @@ def _build_series_label(
         return "series"
     whitelist = legend_label_whitelist or list(DEFAULT_LEGEND_LABEL_WHITELIST)
     allow = set(whitelist) if whitelist else set()
-    pairs = [f"{k}={metric[k]}" for k in sorted(metric.keys()) if k in allow]
-    label = ", ".join(pairs) if pairs else metric.get("__name__", "series")
+    pairs = [f"{k}={metric[k]}" for k in sorted(metric.keys()) if k in allow and k != "__name__"]
+    if pairs:
+        label = ", ".join(pairs)
+    else:
+        # 白名单未命中时兜底：显示所有非 __name__ 的标签（避免漏掉 status 等）
+        fallback = [f"{k}={v}" for k, v in sorted(metric.items()) if k != "__name__"]
+        label = ", ".join(fallback) if fallback else metric.get("__name__", "series")
     if len(label) > 90:
         return label[:87] + "..."
     return label
@@ -643,9 +648,10 @@ def generate_plot_from_generator_url(
         ax.spines['left'].set_linewidth(2)
         ax.spines['bottom'].set_linewidth(2)
         
-        # 优化图例显示 - 放在右侧
+        # 优化图例显示 - 放在右侧（单条曲线也显示，便于看到 status=500 等）
+        legend_obj = None
         if plotted > 0:
-            legend = ax.legend(
+            legend_obj = ax.legend(
                 loc="center left",
                 bbox_to_anchor=(1.02, 0.5),
                 fontsize=12,
@@ -657,12 +663,15 @@ def generate_plot_from_generator_url(
                 borderpad=1.0,
                 labelspacing=0.8,
                 handlelength=2.0,
-                handletextpad=0.8
+                handletextpad=0.8,
             )
-            for text in legend.get_texts():
+            for text in legend_obj.get_texts():
                 text.set_color('#ffffff')
                 text.set_fontweight('normal')
-        
+
+        # 确保图例在 savefig(bbox_inches='tight') 时不被裁掉
+        extra_artists = [legend_obj] if legend_obj is not None else []
+
         # 优化时间轴显示 - 只显示时间（时:分:秒），不显示日期
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S', tz=ZoneInfo("Asia/Shanghai")))
         # 根据时间范围自动调整刻度间隔
@@ -708,11 +717,14 @@ def generate_plot_from_generator_url(
         ax.imshow(Z, extent=[x_min, x_max, y_min, y_max], 
                   aspect='auto', cmap=cmap, alpha=0.3, zorder=0, origin='lower')
         
-        # 确保图表紧凑但不会裁剪内容
+        # 确保图表紧凑但不会裁剪内容；图例在右侧，bbox_extra_artists 避免被 tight 裁掉
         fig.tight_layout(pad=3.5)
 
         buffer = BytesIO()
-        fig.savefig(buffer, format='png', dpi=150, facecolor='#0a0a0f', edgecolor='none', bbox_inches='tight')
+        fig.savefig(
+            buffer, format='png', dpi=150, facecolor='#0a0a0f', edgecolor='none',
+            bbox_inches='tight', bbox_extra_artists=extra_artists,
+        )
         plt.close(fig)
         return buffer.getvalue()
     except requests.RequestException as exc:
