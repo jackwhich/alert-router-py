@@ -32,23 +32,61 @@ prometheus_image:
   step: "30s"
   timeout_seconds: 8
   max_series: 8
-  # 图例标签白名单：仅以下 label 会显示在趋势图图例中，不在此列表的一律不显示（便于统一控制）
-  # 不配置则使用代码内默认：pod, container, device, mountpoint, fstype, instance, topic, consumergroup, service_name, jenkins_job, build_number, name, endpoint, node
+  # 图例标签白名单：仅以下 label 会显示在趋势图图例中，不在此列表的一律不显示
+  # 按类型分组便于维护；未命中 profile 时使用此默认列表（已对照 dc-prometheus 规则补全）
   legend_label_whitelist:
+    # K8s/容器
     - pod
     - container
+    - namespace
+    - deployment
+    - statefulset
+    - daemonset
+    - job_name
+    - horizontalpodautoscaler
+    - persistentvolumeclaim
+    - persistentvolume
+    - phase
+    # 节点/磁盘
     - device
     - mountpoint
     - fstype
     - instance
+    - node
+    # Kafka（积压/分区数/broker/副本 等）
     - topic
     - consumergroup
+    - name
+    - address
+    # RocketMQ（积压/消费延时/broker/TPS 等）
+    - group
+    - broker
+    - brokerIP
+    - cluster
+    - env
+    # RPC/服务/Dubbo/Hikaricp
     - service_name
+    - endpoint
+    - application
+    # Jenkins
     - jenkins_job
     - build_number
-    - name
-    - endpoint
-    - node
+    # Nginx（4XX/5XX/uri/源IP 等）
+    - server_name
+    - status
+    - uri
+    - request_uri
+    - remote_addr
+    - url
+    # Prometheus/Alertmanager
+    - alertmanager
+    - remote_name
+    - controller
+    - resource
+    # Nacos（节点宕机/CPU 等，nacos_monitor 用 name、kubernetes_namespace）
+    - kubernetes_namespace
+    # 通用/TargetDown 等
+    - service
 
 # Grafana 告警图片渲染
 grafana_image:
