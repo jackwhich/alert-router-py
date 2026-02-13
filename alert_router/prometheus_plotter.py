@@ -42,8 +42,11 @@ def _build_series_label(metric: Dict[str, str]) -> str:
     if not metric:
         return "series"
     pairs = []
-    # 排除的标签：不需要在图例中显示（namespace 通常与 group 一致，不参与区分曲线）
-    exclude_keys = {"__name__", "replica", "prometheus", "job", "instance", "namespace"}
+    # 图例中不显示：告警/系统类 + 与当前告警无关的冗余标签
+    exclude_keys = {
+        "__name__", "replica", "prometheus", "job", "instance", "namespace",
+        "alertname", "cluster", "severity",
+    }
     for k in sorted(metric.keys()):
         if k in exclude_keys:
             continue

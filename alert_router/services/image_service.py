@@ -121,6 +121,9 @@ class ImageService:
         plot_engine = image_cfg.get("plot_engine", "plotly")
         use_plotly = plot_engine.lower() == "plotly"
 
+        legend_whitelist = image_cfg.get("legend_label_whitelist")
+        if legend_whitelist is not None and not isinstance(legend_whitelist, list):
+            legend_whitelist = None
         image_bytes = generate_plot_from_generator_url(
             alert.get("generatorURL", ""),
             prometheus_url=prometheus_url,
@@ -132,6 +135,8 @@ class ImageService:
             alertname=alertname,
             alert_time=alert_time,
             use_plotly=use_plotly,
+            alert_labels=alert.get("labels") or {},
+            legend_label_whitelist=legend_whitelist,
         )
         
         if image_bytes:

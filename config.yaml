@@ -32,6 +32,23 @@ prometheus_image:
   step: "30s"
   timeout_seconds: 8
   max_series: 8
+  # 图例标签白名单：仅以下 label 会显示在趋势图图例中，不在此列表的一律不显示（便于统一控制）
+  # 不配置则使用代码内默认：pod, container, device, mountpoint, fstype, instance, topic, consumergroup, service_name, jenkins_job, build_number, name, endpoint, node
+  legend_label_whitelist:
+    - pod
+    - container
+    - device
+    - mountpoint
+    - fstype
+    - instance
+    - topic
+    - consumergroup
+    - service_name
+    - jenkins_job
+    - build_number
+    - name
+    - endpoint
+    - node
 
 # Grafana 告警图片渲染
 grafana_image:
