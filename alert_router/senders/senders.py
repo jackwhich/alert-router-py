@@ -167,6 +167,13 @@ def send_telegram(
             logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
         return response
     except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 400:
+            try:
+                err_body = e.response.text
+                if err_body and logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Telegram 400 响应: {err_body[:500]}")
+            except Exception:
+                pass
         # 400 且使用了 parse_mode 时，可能是 HTML 解析错误，用纯文本重试一次（保留图片）
         if (
             e.response is not None
