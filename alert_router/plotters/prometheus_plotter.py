@@ -119,17 +119,62 @@ except ImportError:
     logger.info("Plotly 未安装，将使用 matplotlib 生成图表。要使用更美观的图表，请安装: pip install plotly kaleido")
 
 
-def _build_series_label(metric: Dict[str, str]) -> str:
-    """从 Prometheus metric 标签构造曲线名称。"""
+# 告警里仅用于路由/展示、通常不出现在 metric 里的标签，过滤曲线时不参与匹配
+_ALERT_ONLY_LABELS = {"alertname", "severity", "cluster", "_source", "_receiver"}
+
+# 图例标签白名单：仅在此列表中的 label 会显示在图例中，便于统一控制（可在 config 中覆盖）
+# 来源于告警规则常见维度：pod/container、device/mountpoint/fstype、instance、Kafka/RPC/Jenkins 等
+DEFAULT_LEGEND_LABEL_WHITELIST = (
+    "pod", "container", "device", "mountpoint", "fstype", "instance",
+    "topic", "consumergroup", "service_name", "jenkins_job", "build_number",
+    "name", "endpoint", "node",
+)
+
+
+def _filter_result_by_alert_labels(
+    result: List[dict],
+    alert_labels: Optional[Dict[str, str]],
+) -> List[dict]:
+    """
+    按告警 labels 过滤 query_range 返回的曲线，只保留与当前告警目标一致的 series。
+    例如告警是 device=/dev/sdb1, mountpoint=/data，则图里只画该磁盘的曲线，而不是所有 tmpfs 等。
+    """
+    if not alert_labels or not result:
+        return result
+    # 只拿会出现在 metric 里的标签做匹配（值为字符串；合并告警时可能为列表则跳过）
+    match_labels = {
+        k: v for k, v in alert_labels.items()
+        if k not in _ALERT_ONLY_LABELS and v and isinstance(v, str)
+    }
+    if not match_labels:
+        return result
+    filtered = [
+        s for s in result
+        if isinstance(s.get("metric"), dict)
+        and all(s["metric"].get(k) == v for k, v in match_labels.items())
+    ]
+    if filtered:
+        logger.debug(
+            "按告警 labels 过滤曲线: 共 %s 条 -> 匹配 %s 条 (labels: %s)",
+            len(result), len(filtered), list(match_labels.keys()),
+        )
+        return filtered
+    return result
+
+
+def _build_series_label(
+    metric: Dict[str, str],
+    legend_label_whitelist: Optional[List[str]] = None,
+) -> str:
+    """
+    从 Prometheus metric 标签构造曲线名称。
+    仅显示白名单中的标签；白名单为空或未传时使用默认白名单（便于统一控制）。
+    """
     if not metric:
         return "series"
-    pairs = []
-    # 排除的标签：不需要在图例中显示（namespace 通常与 group 一致，不参与区分曲线）
-    exclude_keys = {"__name__", "replica", "prometheus", "job", "instance", "namespace"}
-    for k in sorted(metric.keys()):
-        if k in exclude_keys:
-            continue
-        pairs.append(f"{k}={metric[k]}")
+    whitelist = legend_label_whitelist or list(DEFAULT_LEGEND_LABEL_WHITELIST)
+    allow = set(whitelist) if whitelist else set()
+    pairs = [f"{k}={metric[k]}" for k in sorted(metric.keys()) if k in allow]
     label = ", ".join(pairs) if pairs else metric.get("__name__", "series")
     if len(label) > 90:
         return label[:87] + "..."
@@ -140,6 +185,7 @@ def _generate_plot_with_plotly(
     result: list,
     alertname: Optional[str] = None,
     alert_time: Optional[str] = None,
+    legend_label_whitelist: Optional[List[str]] = None,
 ) -> Optional[bytes]:
     """
     使用 Plotly 生成美观的图表（推荐）
@@ -199,7 +245,10 @@ def _generate_plot_with_plotly(
             if not xs:
                 continue
             
-            label = _build_series_label(series.get("metric") or {})
+            label = _build_series_label(
+                series.get("metric") or {},
+                legend_label_whitelist=legend_label_whitelist,
+            )
             color = colors[idx % len(colors)]
             
             # 将十六进制颜色转换为 rgba 格式（用于填充）
@@ -340,9 +389,14 @@ def generate_plot_from_generator_url(
     alertname: Optional[str] = None,
     alert_time: Optional[str] = None,
     use_plotly: bool = True,  # 默认使用 Plotly
+    alert_labels: Optional[Dict[str, str]] = None,  # 告警 labels，用于只画与当前告警匹配的曲线
+    legend_label_whitelist: Optional[List[str]] = None,  # 图例中只显示这些 label，不配置则用默认白名单
 ) -> Optional[bytes]:
     """
     根据 generatorURL 生成 Prometheus 趋势图。
+
+    若提供 alert_labels，会先按 instance/device/mountpoint 等过滤曲线，使图与告警文案一致。
+    legend_label_whitelist 控制图例中显示哪些标签（白名单），便于统一控制。
 
     返回:
         PNG 二进制内容；无法生成时返回 None。
@@ -422,9 +476,17 @@ def generate_plot_from_generator_url(
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
             return None
 
+        # 按告警 labels 过滤，只画与当前告警目标一致的曲线（如图只显示 /dev/sdb1 /data 而非全部 tmpfs）
+        result = _filter_result_by_alert_labels(result, alert_labels)
+        if result and len(result) > max_series:
+            result = result[:max_series]
+
         # 优先使用 Plotly 生成更美观的图表
         if use_plotly and PLOTLY_AVAILABLE:
-            plotly_result = _generate_plot_with_plotly(result, alertname, alert_time)
+            plotly_result = _generate_plot_with_plotly(
+                result, alertname, alert_time,
+                legend_label_whitelist=legend_label_whitelist,
+            )
             if plotly_result:
                 return plotly_result
             logger.info("Plotly 出图失败，回退到 matplotlib")
@@ -478,7 +540,10 @@ def generate_plot_from_generator_url(
             if not xs:
                 continue
             
-            label = _build_series_label(series.get("metric") or {})
+            label = _build_series_label(
+                series.get("metric") or {},
+                legend_label_whitelist=legend_label_whitelist,
+            )
             # 使用模运算确保颜色索引不越界
             color = colors[idx % len(colors)]
             # 绘制数据线 - 更粗更明显
