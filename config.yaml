@@ -129,7 +129,6 @@ routing:
   - match:
       _source: "prometheus"
       _receiver: "Prometheus"
-      jenkins_job: ".*"
     send_to: ["prometheus_telegram_default"]
 
   # 告警来源 = Prometheus（支持 critical 或 灾难）
