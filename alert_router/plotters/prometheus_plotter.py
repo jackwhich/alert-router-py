@@ -374,8 +374,26 @@ def generate_plot_from_generator_url(
                 return None
             prometheus_base = f"{parsed.scheme}://{parsed.netloc}"
 
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(minutes=max(1, lookback_minutes))
+        # 时间范围：有 alert_time 时以告警时刻为基准，保证图里包含告警时段的数据；否则用当前时间往前推
+        now_utc = datetime.now(timezone.utc)
+        lb = max(1, lookback_minutes)
+        if alert_time:
+            try:
+                from dateutil import parser as dateutil_parser
+                alert_dt = dateutil_parser.parse(alert_time)
+                if alert_dt.tzinfo is None:
+                    alert_dt = alert_dt.replace(tzinfo=timezone.utc)
+                # 以告警时刻为 end，往前推 lookback，这样趋势图能覆盖告警前后
+                end = alert_dt + timedelta(minutes=2)
+                if end > now_utc:
+                    end = now_utc
+                start = end - timedelta(minutes=lb)
+            except Exception:
+                end = now_utc
+                start = end - timedelta(minutes=lb)
+        else:
+            end = now_utc
+            start = end - timedelta(minutes=lb)
         prometheus_api = f"{prometheus_base}/api/v1/query_range"
         params = {
             "query": expr,

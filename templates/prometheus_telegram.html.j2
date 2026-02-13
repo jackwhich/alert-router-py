@@ -11,11 +11,11 @@
 时间: {{ startsAt | e }}
 
 {% for key, value in (labels or {}).items() %}
-{% if value is sequence and (value is not string) %}
-{{ key | e }}: {{ (value | unique | sort | join(', ')) | e }}<br>
-{% else %}
-{{ key | e }}: {{ value | e }}<br>
-{% endif %}
+{% if value is sequence and (value is not string) -%}
+{{ (key | e) ~ ': ' ~ (value | unique | sort | join(', ') | e) }}<br>
+{%- else -%}
+{{ (key | e) ~ ': ' ~ (value | e) }}<br>
+{%- endif %}
 {% endfor %}
 
 {% if (annotations or {}).summary -%}
