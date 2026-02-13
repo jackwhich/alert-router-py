@@ -167,18 +167,18 @@ def send_telegram(
             logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
         return response
     except requests.exceptions.HTTPError as e:
-        # 400 且使用了 parse_mode 时，可能是 HTML 解析错误，用纯文本重试一次
+        # 400 且使用了 parse_mode 时，可能是 HTML 解析错误，用纯文本重试一次（保留图片）
         if (
             e.response is not None
             and e.response.status_code == 400
             and parse_mode
         ):
             logger.warning(
-                f"Telegram 返回 400 (渠道: {ch.name})，尝试以纯文本重发（去掉 parse_mode）"
+                f"Telegram 返回 400 (渠道: {ch.name})，尝试以纯文本重发（去掉 parse_mode），保留图片"
             )
             try:
-                # 传空字符串表示强制纯文本，避免再次根据模板填成 HTML 导致循环 400
-                return send_telegram(ch, message_text, parse_mode="", photo_bytes=None)
+                # 传空字符串表示强制纯文本，避免再次根据模板填成 HTML 导致循环 400；保留 photo_bytes 以便仍发图
+                return send_telegram(ch, message_text, parse_mode="", photo_bytes=photo_bytes)
             except requests.exceptions.RequestException:
                 pass
         _log_telegram_error(ch.name, e)
