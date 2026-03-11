@@ -29,6 +29,7 @@ from .services import AlertService, ImageService, ChannelFilter
 # 绘图器（新增）
 from .plotters import (
     generate_plot_from_generator_url,
+    generate_plot_from_result,
     generate_plot_from_grafana_generator_url,
 )
 
@@ -56,5 +57,6 @@ __all__ = [
     "ChannelFilter",
     # 绘图器
     "generate_plot_from_generator_url",
+    "generate_plot_from_result",
     "generate_plot_from_grafana_generator_url",
 ]

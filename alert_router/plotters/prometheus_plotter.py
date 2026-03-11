@@ -198,6 +198,16 @@ def _filter_result_by_alert_labels(
     return result
 
 
+def _legend_line_with_stats(label: str, ys: List[float]) -> str:
+    """借鉴参考图：图例第二行显示均值、最大、最小。"""
+    if not ys:
+        return label
+    mean_y = sum(ys) / len(ys)
+    max_y = max(ys)
+    min_y = min(ys)
+    return f"{label}\n均值 {mean_y:.1f}  最大 {max_y:.1f}  最小 {min_y:.1f}"
+
+
 def _build_series_label(
     metric: Dict[str, str],
     legend_label_whitelist: Optional[List[str]] = None,
@@ -255,6 +265,7 @@ def _generate_plot_with_plotly(
         ]
         
         plotted = 0
+        all_timestamps: List[datetime] = []  # 用于红线/阴影和 x 范围
         for idx, series in enumerate(result):
             values = series.get("values") or []
             if not values:
@@ -290,6 +301,7 @@ def _generate_plot_with_plotly(
                 series.get("metric") or {},
                 legend_label_whitelist=legend_label_whitelist,
             )
+            legend_label = _legend_line_with_stats(label, list(ys))
             color = colors[idx % len(colors)]
             
             # 将十六进制颜色转换为 rgba 格式（用于填充）
@@ -300,12 +312,12 @@ def _generate_plot_with_plotly(
                 b = int(hex_color[4:6], 16)
                 return f'rgba({r}, {g}, {b}, {alpha})'
             
-            # 添加填充区域（渐变效果）
+            # 添加填充区域（渐变效果），图例含均值/最大/最小
             fig.add_trace(go.Scatter(
                 x=list(xs),
                 y=list(ys),
                 mode='lines+markers',
-                name=label,
+                name=legend_label,
                 line=dict(
                     color=color,
                     width=3,
@@ -320,13 +332,16 @@ def _generate_plot_with_plotly(
                 fillcolor=hex_to_rgba(color, 0.2),
                 hovertemplate=f'<b>{label}</b><br>时间: %{{x}}<br>值: %{{y}}<extra></extra>',
             ))
+            all_timestamps.extend(xs)
             plotted += 1
         
         if plotted == 0:
             return None
         
-        # 设置标题
+        # 设置标题与 Y 轴单位（借鉴参考图：使用率类注明 %）
         chart_title = alertname if alertname else "Prometheus Alert Trend"
+        _an = (alertname or "").upper()
+        yaxis_title = "使用率 (%)" if ("使用率" in (alertname or "")) or ("CPU" in _an) else ""
         
         # X轴标签
         if alert_time:
@@ -344,15 +359,17 @@ def _generate_plot_with_plotly(
         
         # 使用检测到的中文字体，避免标题/图例中文显示为方框
         plot_font_family = _get_cjk_font_family() or "Arial, sans-serif"
-        # 更新布局 - 使用深色主题，更现代
+        # 绘图区左侧约 72%，图例紧挨在右侧留白（不压红线），间距适中
         fig.update_layout(
             title=dict(
                 text=chart_title,
                 font=dict(size=24, color='#ffffff', family=plot_font_family),
                 x=0.5,
                 xanchor='center',
+                pad=dict(t=40),
             ),
             xaxis=dict(
+                domain=[0, 0.72],
                 title=dict(text=xlabel_text, font=dict(size=14, color='#ffffff')),
                 tickfont=dict(size=11, color='#ffffff', family=plot_font_family),
                 gridcolor='rgba(255, 255, 255, 0.2)',
@@ -361,7 +378,7 @@ def _generate_plot_with_plotly(
                 zeroline=False,
             ),
             yaxis=dict(
-                title="",
+                title=dict(text=yaxis_title, font=dict(size=12, color='#ffffff', family=plot_font_family)),
                 tickfont=dict(size=12, color='#ffffff', family=plot_font_family),
                 gridcolor='rgba(255, 255, 255, 0.2)',
                 gridwidth=1,
@@ -372,11 +389,11 @@ def _generate_plot_with_plotly(
             paper_bgcolor='#0a0a0f',
             font=dict(family=plot_font_family),
             legend=dict(
-                bgcolor='rgba(26, 26, 46, 0.95)',
+                bgcolor='rgba(26, 26, 46, 0.98)',
                 bordercolor='rgba(255, 255, 255, 0.3)',
                 borderwidth=1,
                 font=dict(size=12, color='#ffffff', family=plot_font_family),
-                x=0.92,
+                x=0.76,
                 y=0.5,
                 xanchor='left',
                 yanchor='middle',
@@ -416,6 +433,200 @@ def _generate_plot_with_plotly(
     except Exception as exc:
         logger.warning("Plotly 出图异常，回退到 matplotlib: %s", exc)
         return None
+
+
+def _generate_plot_with_matplotlib(
+    result: list,
+    alertname: Optional[str] = None,
+    alert_time: Optional[str] = None,
+    legend_label_whitelist: Optional[List[str]] = None,
+) -> Optional[bytes]:
+    """
+    使用 Matplotlib 从已解析的 result 生成趋势图（含红线、图例在右）。
+    供 generate_plot_from_generator_url 与 generate_plot_from_result 复用。
+    """
+    import numpy as np
+    from matplotlib.colors import LinearSegmentedColormap
+
+    fig, ax = plt.subplots(figsize=(14, 7), dpi=150)
+    plotted = 0
+    time_axis_xs: List[datetime] = []
+    colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e']
+    if len(result) > len(colors):
+        colors = plt.cm.Set2(range(len(result)))
+
+    for idx, series in enumerate(result):
+        values = series.get("values") or []
+        if not values:
+            continue
+        xs = []
+        ys = []
+        for item in values:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            try:
+                ts = float(item[0])
+                val = float(item[1])
+            except (TypeError, ValueError):
+                continue
+            utc_time = datetime.fromtimestamp(ts, tz=timezone.utc)
+            utc8_time = utc_time.astimezone(ZoneInfo("Asia/Shanghai"))
+            xs.append(utc8_time)
+            ys.append(val)
+        if not xs:
+            continue
+        sorted_pairs = sorted(zip(xs, ys), key=lambda x: x[0])
+        xs, ys = zip(*sorted_pairs) if sorted_pairs else ([], [])
+        if not xs:
+            continue
+        label = _build_series_label(
+            series.get("metric") or {},
+            legend_label_whitelist=legend_label_whitelist,
+        )
+        if not label or not label.strip():
+            label = series.get("metric", {}).get("__name__", f"series_{idx}")
+        legend_label = _legend_line_with_stats(label, list(ys))
+        color = colors[idx % len(colors)]
+        ax.plot(xs, ys, linewidth=3.0, label=legend_label, color=color, marker='o', markersize=4, alpha=0.95, zorder=5 - idx)
+        time_axis_xs = list(xs)
+        plotted += 1
+
+    if plotted == 0:
+        plt.close(fig)
+        return None
+
+    # 借鉴参考图：使用率类显示 Y 轴单位
+    _an = (alertname or "").upper()
+    show_pct = ("使用率" in (alertname or "")) or ("CPU" in _an)
+
+    chart_title = alertname if alertname else "Prometheus Alert Trend"
+    ax.set_title(chart_title, fontsize=20, fontweight='bold', pad=40, color='#ffffff')
+
+    if alert_time:
+        try:
+            from dateutil import parser
+            alert_dt = parser.parse(alert_time)
+            if alert_dt.tzinfo is None:
+                alert_dt = alert_dt.replace(tzinfo=timezone.utc)
+            alert_dt_utc8 = alert_dt.astimezone(ZoneInfo("Asia/Shanghai"))
+            xlabel_text = alert_dt_utc8.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            xlabel_text = "Time (UTC+8)"
+    else:
+        xlabel_text = "Time (UTC+8)"
+    ax.set_xlabel(xlabel_text, fontsize=14, color='#ffffff', fontweight='normal')
+    ax.set_ylabel("使用率 (%)" if show_pct else "", fontsize=12 if show_pct else 0, color='#ffffff')
+
+    def format_y_value(x, p):
+        if abs(x) >= 1000:
+            return f'{x/1000:.2f} K'.rstrip('0').rstrip('.')
+        elif x == int(x):
+            return f'{int(x)}'
+        return f'{x:.1f}'
+
+    if show_pct:
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1f}%'))
+    else:
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(format_y_value))
+    ax.tick_params(axis='y', labelsize=12, colors='#ffffff', width=1)
+    ax.tick_params(axis='x', labelsize=11, colors='#ffffff', width=1)
+    ax.grid(True, linestyle="--", alpha=0.4, linewidth=1.0, color='#ffffff')
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#ffffff')
+    ax.spines['bottom'].set_color('#ffffff')
+    ax.spines['left'].set_linewidth(2)
+    ax.spines['bottom'].set_linewidth(2)
+
+    # 图例在指标图形外、紧挨绘图区右侧，间距适中
+    legend_obj = None
+    if plotted > 0:
+        legend_obj = ax.legend(
+            loc="center left",
+            bbox_to_anchor=(0.82, 0.5),
+            bbox_transform=fig.transFigure,
+            fontsize=11,
+            framealpha=0.98,
+            fancybox=True,
+            shadow=False,
+            edgecolor='#ffffff',
+            facecolor='#1a1a2e',
+            borderpad=1.2,
+            labelspacing=1.0,
+            handlelength=2.0,
+            handletextpad=0.8,
+        )
+        for text in legend_obj.get_texts():
+            text.set_color('#ffffff')
+            text.set_fontweight('normal')
+    extra_artists = [legend_obj] if legend_obj is not None else []
+
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S', tz=ZoneInfo("Asia/Shanghai")))
+    if time_axis_xs:
+        time_span = (max(time_axis_xs) - min(time_axis_xs)).total_seconds()
+        if time_span <= 300:
+            ax.xaxis.set_major_locator(mdates.SecondLocator(interval=30))
+        elif time_span <= 900:
+            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=1))
+        elif time_span <= 3600:
+            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=5))
+        else:
+            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
+    fig.autofmt_xdate(rotation=45)
+
+    fig.patch.set_facecolor('#0a0a0f')
+    ax.set_facecolor('#151520')
+    y_min, y_max = ax.get_ylim()
+    x_min, x_max = ax.get_xlim()
+    y_vals = np.linspace(y_min, y_max, 100)
+    x_vals = np.linspace(x_min, x_max, 100)
+    Z = np.linspace(0, 1, len(y_vals)).reshape(-1, 1)
+    Z = np.tile(Z, (1, len(x_vals)))
+    cmap = LinearSegmentedColormap.from_list('custom', ['#0a0a0f', '#1a1a2e', '#2a2a3e'], N=256)
+    ax.imshow(Z, extent=[x_min, x_max, y_min, y_max], aspect='auto', cmap=cmap, alpha=0.3, zorder=0, origin='lower')
+
+    # 绘图区约 72%，图例在 82% 处，紧挨右侧、不压红线
+    fig.subplots_adjust(right=0.72)
+    fig.tight_layout(pad=3.5, rect=[0, 0, 0.72, 1])
+    buffer = BytesIO()
+    fig.savefig(
+        buffer, format='png', dpi=150, facecolor='#0a0a0f', edgecolor='none',
+        bbox_inches='tight', bbox_extra_artists=extra_artists,
+    )
+    plt.close(fig)
+    return buffer.getvalue()
+
+
+def generate_plot_from_result(
+    result: list,
+    *,
+    alertname: Optional[str] = None,
+    alert_time: Optional[str] = None,
+    use_plotly: bool = True,
+    legend_label_whitelist: Optional[List[str]] = None,
+) -> Optional[bytes]:
+    """
+    从已解析的 Prometheus query_range result 直接生成趋势图（不发起 HTTP 请求）。
+    用于本地测试或已有 result 数据的场景。含告警时刻红线，图例在红线右侧。
+    """
+    if not result:
+        return None
+    if use_plotly and PLOTLY_AVAILABLE:
+        png = _generate_plot_with_plotly(
+            result, alertname, alert_time,
+            legend_label_whitelist=legend_label_whitelist,
+        )
+        if png:
+            return png
+    _setup_matplotlib_cjk_font()
+    warnings.filterwarnings(
+        "ignore",
+        message=".*Glyph.*missing from font",
+        category=UserWarning,
+        module="matplotlib",
+    )
+    return _generate_plot_with_matplotlib(result, alertname, alert_time, legend_label_whitelist)
 
 
 def generate_plot_from_generator_url(
@@ -536,204 +747,20 @@ def generate_plot_from_generator_url(
 
         # 使用 Matplotlib 生成图表（备选方案）
         _setup_matplotlib_cjk_font()
-        # 无 CJK 字体时抑制 "Glyph xxx missing from font" 刷屏（savefig 时触发）
         warnings.filterwarnings(
             "ignore",
             message=".*Glyph.*missing from font",
             category=UserWarning,
             module="matplotlib",
         )
-        # 创建图表 - 使用更大的尺寸
-        fig, ax = plt.subplots(figsize=(14, 7), dpi=150)
-        
-        plotted = 0
-        # 使用更鲜艳、对比度更好的颜色方案
-        # 使用 Set2 或 Set3 调色板，颜色更鲜艳
-        colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e']
-        # 如果数据系列超过预设颜色数量，使用调色板生成更多颜色
-        if len(result) > len(colors):
-            colors = plt.cm.Set2(range(len(result)))
-        
-        for idx, series in enumerate(result):
-            values = series.get("values") or []
-            if not values:
-                continue
-            xs = []
-            ys = []
-            for item in values:
-                if not isinstance(item, (list, tuple)) or len(item) < 2:
-                    continue
-                try:
-                    ts = float(item[0])
-                    val = float(item[1])
-                except (TypeError, ValueError):
-                    continue
-                # 将 UTC 时间转换为 UTC+8
-                utc_time = datetime.fromtimestamp(ts, tz=timezone.utc)
-                utc8_time = utc_time.astimezone(ZoneInfo("Asia/Shanghai"))
-                xs.append(utc8_time)
-                ys.append(val)
-            if not xs:
-                continue
-            
-            # 确保数据点按时间排序
-            sorted_pairs = sorted(zip(xs, ys), key=lambda x: x[0])
-            xs, ys = zip(*sorted_pairs) if sorted_pairs else ([], [])
-            
-            if not xs:
-                continue
-            
-            label = _build_series_label(
-                series.get("metric") or {},
-                legend_label_whitelist=legend_label_whitelist,
-            )
-            # 确保 label 非空，避免图例不显示
-            if not label or not label.strip():
-                label = series.get("metric", {}).get("__name__", f"series_{idx}")
-            # 使用模运算确保颜色索引不越界
-            color = colors[idx % len(colors)]
-            # 绘制数据线 - 更粗更明显
-            ax.plot(xs, ys, linewidth=3.0, label=label, color=color, marker='o', markersize=4, alpha=0.95, zorder=5-idx)
-            plotted += 1
-
-        if plotted == 0:
-            plt.close(fig)
-            logger.info("Prometheus query_range 结果无法解析为曲线，跳过出图")
-            return None
-
-        # 优化图表样式 - 使用实际的 alertname 作为标题
-        chart_title = alertname if alertname else "Prometheus Alert Trend"
-        ax.set_title(chart_title, fontsize=20, fontweight='bold', pad=30, color='#ffffff')
-        
-        # X轴标签显示告警时间（UTC+8，到秒）
-        if alert_time:
-            try:
-                # 解析告警时间并转换为 UTC+8
-                from dateutil import parser
-                alert_dt = parser.parse(alert_time)
-                if alert_dt.tzinfo is None:
-                    # 如果没有时区信息，假设是 UTC
-                    alert_dt = alert_dt.replace(tzinfo=timezone.utc)
-                # 转换为 UTC+8
-                alert_dt_utc8 = alert_dt.astimezone(ZoneInfo("Asia/Shanghai"))
-                # 格式化为字符串：年-月-日 时:分:秒
-                xlabel_text = alert_dt_utc8.strftime('%Y-%m-%d %H:%M:%S')
-            except Exception:
-                # 如果解析失败，使用默认标签
-                xlabel_text = "Time (UTC+8)"
-        else:
-            xlabel_text = "Time (UTC+8)"
-        
-        ax.set_xlabel(xlabel_text, fontsize=14, color='#ffffff', fontweight='normal')
-        
-        # Y轴不显示标签，保持简洁
-        ax.set_ylabel("", fontsize=0)
-        
-        # 优化Y轴数值格式 - 使用K格式（类似Grafana）
-        def format_y_value(x, p):
-            if abs(x) >= 1000:
-                return f'{x/1000:.2f} K'.rstrip('0').rstrip('.')
-            elif x == int(x):
-                return f'{int(x)}'
-            else:
-                return f'{x:.1f}'
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(format_y_value))
-        ax.tick_params(axis='y', labelsize=12, colors='#ffffff', width=1)
-        ax.tick_params(axis='x', labelsize=11, colors='#ffffff', width=1)
-        
-        # 改进网格样式 - 更明显
-        ax.grid(True, linestyle="--", alpha=0.4, linewidth=1.0, color='#ffffff')
-        ax.set_axisbelow(True)
-        
-        # 设置坐标轴颜色
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_color('#ffffff')
-        ax.spines['bottom'].set_color('#ffffff')
-        ax.spines['left'].set_linewidth(2)
-        ax.spines['bottom'].set_linewidth(2)
-        
-        # 优化图例显示 - 放在右侧（单条曲线也显示，便于看到 status=500 等）
-        legend_obj = None
-        if plotted > 0:
-            legend_obj = ax.legend(
-                loc="center left",
-                bbox_to_anchor=(1.02, 0.5),
-                fontsize=12,
-                framealpha=0.95,
-                fancybox=True,
-                shadow=False,
-                edgecolor='#ffffff',
-                facecolor='#1a1a2e',
-                borderpad=1.0,
-                labelspacing=0.8,
-                handlelength=2.0,
-                handletextpad=0.8,
-            )
-            for text in legend_obj.get_texts():
-                text.set_color('#ffffff')
-                text.set_fontweight('normal')
-
-        # 确保图例在 savefig(bbox_inches='tight') 时不被裁掉
-        extra_artists = [legend_obj] if legend_obj is not None else []
-
-        # 优化时间轴显示 - 只显示时间（时:分:秒），不显示日期
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S', tz=ZoneInfo("Asia/Shanghai")))
-        # 根据时间范围自动调整刻度间隔
-        if len(xs) > 0:
-            time_span = (max(xs) - min(xs)).total_seconds()
-            if time_span <= 300:  # 5分钟以内，每30秒一个刻度
-                ax.xaxis.set_major_locator(mdates.SecondLocator(interval=30))
-            elif time_span <= 900:  # 15分钟以内，每1分钟一个刻度
-                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=1))
-            elif time_span <= 3600:  # 1小时以内，每5分钟一个刻度
-                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=5))
-            else:  # 超过1小时，每15分钟一个刻度
-                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
-        fig.autofmt_xdate(rotation=45)
-        
-        # 优化背景 - 使用现代渐变背景，更有视觉冲击力
-        # 使用深色到浅色的渐变背景
-        fig.patch.set_facecolor('#0a0a0f')  # 深黑色背景
-        
-        # 图表区域使用深色渐变背景
-        ax.set_facecolor('#151520')  # 深灰蓝色
-        
-        # 创建垂直渐变效果（从下到上）
-        import numpy as np
-        y_min, y_max = ax.get_ylim()
-        x_min, x_max = ax.get_xlim()
-        
-        # 创建渐变网格
-        y_vals = np.linspace(y_min, y_max, 100)
-        x_vals = np.linspace(x_min, x_max, 100)
-        X, Y = np.meshgrid(x_vals, y_vals)
-        
-        # 创建渐变（从深到浅）
-        Z = np.linspace(0, 1, len(y_vals)).reshape(-1, 1)
-        Z = np.tile(Z, (1, len(x_vals)))
-        
-        # 使用自定义颜色映射（深蓝到浅蓝）
-        from matplotlib.colors import LinearSegmentedColormap
-        colors_gradient = ['#0a0a0f', '#1a1a2e', '#2a2a3e']
-        n_bins = 256
-        cmap = LinearSegmentedColormap.from_list('custom', colors_gradient, N=n_bins)
-        
-        ax.imshow(Z, extent=[x_min, x_max, y_min, y_max], 
-                  aspect='auto', cmap=cmap, alpha=0.3, zorder=0, origin='lower')
-        
-        # 先手动调整布局预留右侧空间给图例（更可靠）
-        fig.subplots_adjust(right=0.78)
-        # 再调用 tight_layout，但 rect 限制在 0-0.78 范围内，确保图例空间不被占用
-        fig.tight_layout(pad=3.5, rect=[0, 0, 0.78, 1])
-
-        buffer = BytesIO()
-        fig.savefig(
-            buffer, format='png', dpi=150, facecolor='#0a0a0f', edgecolor='none',
-            bbox_inches='tight', bbox_extra_artists=extra_artists,
+        png = _generate_plot_with_matplotlib(
+            result, alertname, alert_time,
+            legend_label_whitelist=legend_label_whitelist,
         )
-        plt.close(fig)
-        return buffer.getvalue()
+        if png is not None:
+            return png
+        logger.info("Prometheus query_range 结果无法解析为曲线，跳过出图")
+        return None
     except requests.RequestException as exc:
         logger.warning("Prometheus 出图请求失败，跳过图片发送: %s", exc)
         return None
