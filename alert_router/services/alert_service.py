@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 
 from requests.exceptions import HTTPError, RequestException
 
+from ..routing.grafana_dedup import should_skip_grafana_duplicate
 from ..routing.jenkins_dedup import should_skip_jenkins_firing
 from ..routing.routing import route
 from ..senders.senders import send_telegram, send_webhook
@@ -84,8 +85,18 @@ class AlertService:
                 "alert_status": alert_status,
             }]
 
-        # 路由到渠道（使用原始 labels，并附带内部来源用于匹配）
         source = alert.get("_source") or labels.get("_source")
+
+        # Grafana 告警去重（同一 fingerprint+status 短时间窗口内只发一次）
+        if source == "grafana" and should_skip_grafana_duplicate(alert, alert_status, self.config):
+            logger.info(f"告警 {alertname} 命中 Grafana 去重窗口，跳过重复通知")
+            return [{
+                "alert": alertname,
+                "skipped": "grafana 去重窗口内重复",
+                "alert_status": alert_status,
+            }]
+
+        # 路由到渠道（使用原始 labels，并附带内部来源用于匹配）
         receiver = alert.get("_receiver")
         match_labels = dict(labels)
         if source:

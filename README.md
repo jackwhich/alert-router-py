@@ -187,7 +187,7 @@ alert-router-py/
 - **adapters/**: 数据源适配器（支持 Prometheus 和 Grafana）
 - **services/**: 业务服务层（告警处理、图片生成、渠道过滤）
 - **plotters/**: 绘图模块（统一管理绘图相关代码）
-- **routing/**: 路由模块（路由匹配、去重逻辑）
+- **routing/**: 路由模块（路由匹配、Jenkins/Grafana 去重）
 - **senders/**: 消息发送模块（HTTP 连接池优化）
 - **templates/**: 模板渲染模块
 
@@ -209,6 +209,7 @@ alert-router-py/
 ### 高级特性
 - ✅ **图片生成**：支持 Prometheus 和 Grafana 告警趋势图生成（Plotly/Matplotlib）
 - ✅ **Jenkins 去重**：智能去重 Jenkins 告警，避免重复通知
+- ✅ **Grafana 去重**：同一告警（fingerprint+状态）在时间窗口内只发一次，避免重复两条（见 [告警重复排查](docs/DUPLICATE_ALERTS.md)）
 - ✅ **HTTP 连接池**：使用连接池复用连接，提升性能
 - ✅ **服务层架构**：业务逻辑与 HTTP 层分离，便于测试和维护
 - ✅ **渠道过滤**：统一的渠道过滤逻辑，支持图片渠道筛选
