@@ -12,7 +12,12 @@
 
 {% for key, value in (labels or {}).items() %}
 {% if value is sequence and (value is not string) -%}
-{{ (key | e) ~ ': ' ~ (value | unique | sort | join(', ') | e) }}<br>
+{{ (key | e) ~ ': ' }}
+{% for v in (value | unique | sort) %}
+{{ (v | e) }}{% if not loop.last %},{% endif %}
+{% if not loop.last %}<br>{% endif %}
+{% endfor %}
+<br>
 {%- else -%}
 {{ (key | e) ~ ': ' ~ (value | e) }}<br>
 {%- endif %}
