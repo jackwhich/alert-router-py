@@ -40,8 +40,8 @@ RECENT_BUILDS_TO_SCAN = 60
 logging.basicConfig(
     filename="/tmp/jenkins_webhook_tg.log",
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y/%m/%d %H:%M:%S",
+    format='{"time":"%(asctime)s","level":"%(levelname)s","traceId":"-","message":"%(message)s"}',
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 
 app = Flask(__name__)

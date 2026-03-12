@@ -11,13 +11,12 @@ FastAPI 应用主入口
 import json
 import logging
 import os
-import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
 from alert_router.core.config import load_config
-from alert_router.core.logging_config import setup_logging
+from alert_router.core.logging_config import new_trace_id, set_trace_id, setup_logging
 
 # 加载配置（config 只读配置，不初始化日志）
 CONFIG, CHANNELS = load_config()
@@ -44,6 +43,12 @@ async def lifespan(_app: FastAPI):
     # 启动时的初始化
     logger.info("=" * 60)
     logger.info("Alert Router 服务启动")
+    # 打印已加载的路由规则，便于核对 _receiver 等匹配是否生效
+    for idx, r in enumerate(CONFIG.get("routing", [])):
+        if "match" in r:
+            logger.info("路由规则[%d] match=%s send_to=%s", idx, r["match"], r.get("send_to", []))
+        elif r.get("default"):
+            logger.info("路由规则[%d] default=True send_to=%s", idx, r.get("send_to", []))
     server_config = CONFIG.get("server", {})
     host = server_config.get("host")
     port = server_config.get("port")
@@ -89,32 +94,35 @@ def _handle_webhook(payload: dict) -> dict:
 @app.post("/webhook")
 async def webhook(req: Request):
     """接收告警 Webhook 并路由分发（请使用 /webhook 无尾斜杠，避免 307）"""
-    request_id = str(uuid.uuid4())[:8]
-    logger.info(f"[{request_id}] [Webhook 入口] 收到 POST /webhook")
+    trace_id = req.headers.get("X-Trace-Id") or req.headers.get("X-Request-Id") or new_trace_id()
+    set_trace_id(trace_id)
+    logger.info("收到告警 Webhook 请求")
     try:
         payload = await req.json()
         status = payload.get("status")
         alerts_count = len(payload.get("alerts", [])) if payload.get("alerts") else 0
-        logger.info(f"[{request_id}] [接收数据] status={status}, alerts={alerts_count}")
+        logger.info("接收数据状态=%s, 告警数量=%s", status, alerts_count)
         raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
-        logger.info(f"[{request_id}] [接收数据] 完整 Webhook 负载:\n{raw_preview}")
+        logger.info("接收完整 Webhook 负载: %s", raw_preview)
 
         result = _handle_webhook(payload)
         ok = result.get("ok", False)
         sent = result.get("sent", [])
-        logger.info(f"[{request_id}] [Webhook 完成] ok={ok}, 发送结果数={len(sent)}")
+        logger.info("Webhook 处理完成, 成功=%s, 发送结果数=%s", ok, len(sent))
         if not ok:
-            logger.warning(f"[{request_id}] [Webhook 完成] 处理结果异常: {result}")
+            logger.warning("Webhook 处理结果异常: %s", result)
         return result
     except json.JSONDecodeError as e:
-        logger.warning(f"[{request_id}] JSON 解析失败: {e}")
+        logger.warning("JSON 解析失败: %s", e)
         return {"ok": False, "error": "Invalid JSON"}
     except ValueError as e:
-        logger.warning(f"[{request_id}] 数据验证失败: {e}")
+        logger.warning("数据验证失败: %s", e)
         return {"ok": False, "error": "Validation failed"}
     except Exception as e:
-        logger.error(f"[{request_id}] 处理 Webhook 请求失败: {e}", exc_info=True)
+        logger.error("处理 Webhook 请求失败: %s", e, exc_info=True)
         return {"ok": False, "error": "Internal error"}
+    finally:
+        set_trace_id("-")
 
 
 if __name__ == "__main__":

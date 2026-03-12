@@ -6,13 +6,55 @@
 已配置标记挂在 logger 上，避免模块被多次导入时重复添加 handler（同一条日志打两遍）。
 """
 
+import json
 import logging
 import sys
+import uuid
+from contextvars import ContextVar
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any, Dict
 
 # 已配置标记存在 logger 上，保证同一 logger 只配置一次（即使用户或框架多次导入本模块）
 _ATTR_CONFIGURED = "_alert_router_logging_configured"
+_TRACE_ID_CTX: ContextVar[str] = ContextVar("alert_router_trace_id", default="-")
+
+
+def set_trace_id(trace_id: str) -> None:
+    """设置当前上下文 traceId。"""
+    _TRACE_ID_CTX.set(trace_id or "-")
+
+
+def get_trace_id() -> str:
+    """获取当前上下文 traceId。"""
+    return _TRACE_ID_CTX.get()
+
+
+class TraceIdFilter(logging.Filter):
+    """将 traceId 注入到每条日志记录中。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.traceId = get_trace_id()
+        return True
+
+
+class JsonFormatter(logging.Formatter):
+    """统一 JSON 单行日志格式。"""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: Dict[str, Any] = {
+            "time": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+            "level": record.levelname,
+            "traceId": getattr(record, "traceId", "-"),
+            "message": record.getMessage(),
+            "logger": record.name,
+            "file": record.filename,
+            "line": record.lineno,
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
 
 
 def setup_logging(
@@ -54,11 +96,9 @@ def setup_logging(
     # 始终清空已有 handler（防止其它地方或旧逻辑曾添加过），再只加一个 file、一个 console
     logger.handlers.clear()
     
-    # 日志格式
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    # JSON 单行日志格式
+    formatter = JsonFormatter()
+    trace_filter = TraceIdFilter()
     
     # 文件 handler（带轮转），仅一个
     file_handler = RotatingFileHandler(
@@ -69,6 +109,7 @@ def setup_logging(
     )
     file_handler.setLevel(log_level)
     file_handler.setFormatter(formatter)
+    file_handler.addFilter(trace_filter)
     logger.addHandler(file_handler)
     
     # 控制台 handler：仅在交互式终端中才添加，避免在后台运行时重复输出
@@ -78,6 +119,7 @@ def setup_logging(
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(log_level)
         console_handler.setFormatter(formatter)
+        console_handler.addFilter(trace_filter)
         logger.addHandler(console_handler)
     
     setattr(logger, _ATTR_CONFIGURED, True)
@@ -95,3 +137,8 @@ def get_logger(name: str = "alert-router") -> logging.Logger:
         logging.Logger: logger 实例
     """
     return logging.getLogger(name)
+
+
+def new_trace_id() -> str:
+    """生成新的 traceId。"""
+    return str(uuid.uuid4())[:12]

@@ -264,12 +264,17 @@ logging:
 
 日志文件会自动轮转，当日志文件达到 `max_bytes` 大小时，会自动创建新文件，并保留指定数量的备份文件。
 
-日志格式示例：
+日志格式示例（JSON 单行）：
+```json
+{"time":"2026-03-12T22:11:25+08:00","level":"INFO","traceId":"trace-test-001","message":"收到告警 Webhook 请求","logger":"alert-router","file":"app.py","line":99}
+{"time":"2026-03-12T22:11:26+08:00","level":"INFO","traceId":"trace-test-001","message":"告警 HighCPU 已发送到渠道: tg_critical","logger":"alert-router","file":"alert_service.py","line":151}
+{"time":"2026-03-12T22:11:27+08:00","level":"ERROR","traceId":"trace-test-001","message":"告警 HighCPU 发送到渠道 slack_main 失败: 连接超时","logger":"alert-router","file":"alert_service.py","line":288}
 ```
-2024-01-15 10:30:00 - alert-router - INFO - [app.py:273] - 收到告警请求: {...}
-2024-01-15 10:30:01 - alert-router - INFO - [app.py:320] - 告警 HighCPU 已发送到渠道: tg_critical
-2024-01-15 10:30:02 - alert-router - ERROR - [app.py:324] - 告警 HighCPU 发送到渠道 slack_main 失败: Connection timeout
-```
+
+当前日志规范：
+- 必含字段：`time`、`level`、`traceId`、`message`
+- key 使用英文，`message` 使用中文表达
+- 每条日志一行 JSON，便于日志平台采集和检索
 
 ## 配置说明
 

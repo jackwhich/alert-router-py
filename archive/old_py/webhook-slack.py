@@ -7,7 +7,7 @@ from datetime import datetime
 from pytz import timezone, utc
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='{"time":"%(asctime)s","level":"%(levelname)s","traceId":"-","message":"%(message)s"}', datefmt='%Y-%m-%d %H:%M:%S')
 
 status_dict = {
     "firing": {"状态": "❌❌❌❌ 告警"},

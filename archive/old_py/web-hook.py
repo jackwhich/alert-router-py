@@ -13,7 +13,7 @@ TELEGRAM_PROXY_URL = "http://10.8.16.64:13080"
 proxies = {"http": TELEGRAM_PROXY_URL, "https": TELEGRAM_PROXY_URL}
 
 # 设置日志配置
-logging.basicConfig(filename='/var/log/mango-hook.log', level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
+logging.basicConfig(filename='/var/log/mango-hook.log', level=logging.INFO, format='{"time":"%(asctime)s","level":"%(levelname)s","traceId":"-","message":"%(message)s"}', datefmt='%Y-%m-%d %H:%M:%S')
 
 #Flask通用配置
 app = Flask(__name__)

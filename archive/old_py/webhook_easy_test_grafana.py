@@ -19,7 +19,7 @@ status_dict = {
 }
 
 # 配置日志
-logging.basicConfig(filename='/tmp/grafana_mango.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
+logging.basicConfig(filename='/tmp/grafana_mango.log', level=logging.INFO, format='{"time":"%(asctime)s","level":"%(levelname)s","traceId":"-","message":"%(message)s"}', datefmt='%Y-%m-%d %H:%M:%S')
 
 # 初始化 Flask
 app = Flask(__name__)
