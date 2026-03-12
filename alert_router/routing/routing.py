@@ -91,6 +91,7 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
     """
     channels = set()
     default_channels = None
+    matched_rules = []
     
     # 获取路由规则列表，如果不存在则返回空列表
     routing_rules = config.get("routing", [])
@@ -98,15 +99,35 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
         logger.error("配置中未找到 routing 规则，告警将无法发送")
         return []
 
-    logger.info("路由匹配: _source=%s _receiver=%s 规则数=%d", labels.get("_source"), labels.get("_receiver"), len(routing_rules))
+    logger.info(
+        "开始路由匹配: source=%s receiver=%s alertname=%s 规则数=%d",
+        labels.get("_source"),
+        labels.get("_receiver"),
+        labels.get("alertname"),
+        len(routing_rules),
+    )
 
     # 先收集所有匹配的规则和默认规则
     for idx, r in enumerate(routing_rules):
         if "match" in r:
             matched = match(labels, r["match"])
-            logger.info("规则[%d] match_keys=%s match_result=%s cond_receiver=%s", idx, list(r["match"].keys()), matched, r["match"].get("_receiver"))
+            if logger.isEnabledFor(10):  # DEBUG
+                logger.debug(
+                    "规则[%d] 匹配结果=%s 条件=%s",
+                    idx,
+                    matched,
+                    r["match"],
+                )
             if matched:
-                channels.update(r["send_to"])
+                rule_channels = r.get("send_to", [])
+                channels.update(rule_channels)
+                matched_rules.append(
+                    {
+                        "rule_index": idx,
+                        "match": r["match"],
+                        "send_to": rule_channels,
+                    }
+                )
         elif r.get("default"):
             # 默认规则：仅保留第一个，避免多条 default 覆盖
             if default_channels is None:
@@ -120,6 +141,19 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
     if not channels:
         if default_channels:
             channels.update(default_channels)
+            logger.info("未命中特定规则，使用默认规则渠道: %s", default_channels)
         else:
             logger.warning("未找到匹配规则且无默认规则，告警将无法发送")
-    return list(channels)
+
+    final_channels = sorted(list(channels))
+    if matched_rules:
+        logger.info("命中规则数=%d", len(matched_rules))
+        for item in matched_rules:
+            logger.info(
+                "命中规则[%d]: match=%s -> send_to=%s",
+                item["rule_index"],
+                item["match"],
+                item["send_to"],
+            )
+    logger.info("路由结果渠道: %s", final_channels)
+    return final_channels

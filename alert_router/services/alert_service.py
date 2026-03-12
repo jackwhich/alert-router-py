@@ -237,9 +237,10 @@ class AlertService:
             )
             logger.info(
                 f"[发送] 告警 {alertname} -> 渠道 [{channel_name}] "
-                f"(方式: {'图片+文本' if use_image else '纯文本'}), 内容长度={len(body)}"
+                f"(类型: {channel.type}, 方式: {'图片+文本' if use_image else '纯文本'}), 内容长度={len(body)}"
             )
-            logger.info(f"[发送] 渠道 [{channel_name}] 将发送的内容:\n{body}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"[发送] 渠道 [{channel_name}] 将发送的内容:\n{body}")
 
             # 发送消息
             if channel.type == "telegram":
@@ -281,9 +282,10 @@ class AlertService:
                 and e.response.status_code in (401, 404, 410)
             )
             if is_config_error:
-                logger.warning(
-                    f"告警 {alertname} 发送到渠道 {channel_name} 失败: {error_msg} "
-                    f"（请检查该渠道 Webhook URL 配置）"
+                # Webhook 发送层已记录了该类配置错误，这里避免重复 warning 造成日志噪音
+                logger.info(
+                    f"告警 {alertname} 渠道 {channel_name} 发送失败(配置问题): "
+                    "请检查 Webhook URL 是否有效、未过期或已被删除"
                 )
             else:
                 logger.error(
