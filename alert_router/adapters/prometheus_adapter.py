@@ -219,7 +219,6 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "startsAt": first.get("startsAt", ""),
             "endsAt": first.get("endsAt", ""),
             "generatorURL": first.get("generatorURL", payload.get("externalURL", "")),
-            "_source": "prometheus",
         }
         if receiver_name:
             merged["_receiver"] = receiver_name
@@ -239,7 +238,6 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             labels=labels,
             annotations=annotations,
         )
-        alert_obj["_source"] = "prometheus"
         if receiver_name:
             alert_obj["_receiver"] = receiver_name
         alerts.append(alert_obj)

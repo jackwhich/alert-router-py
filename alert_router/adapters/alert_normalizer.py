@@ -1,11 +1,9 @@
 """
 统一解析入口模块
 
-数据源识别与解析：
-- 数据源（Grafana / Prometheus）仅根据「入参 payload 的顶层字段」在此处唯一判定。
-- 判定结果决定调用哪个 adapter 解析，解析时由 adapter 写入告警对象的 _source 字段，路由再按 _source 分发。
-
-两种数据源的 payload 长什么样、用哪些字段区分，见：docs/DATA_SOURCES.md
+- 判断：仅根据 payload 顶层 version（"1"=Grafana，"4"=Prometheus）与是否有 alerts 判定来源。
+- 解析：adapter 只写 _receiver、labels 等；normalizer 按判断结果统一写入 _source。
+- 路由：按 _receiver、alertname、severity 等匹配，见 config 与 docs/FLOW_ROUTING.md。
 """
 import logging
 from typing import Dict, Any, List
@@ -26,29 +24,21 @@ class WebhookFormat(Enum):
 
 def identify_data_source(payload: Dict[str, Any]) -> WebhookFormat:
     """
-    仅根据 payload 顶层结构区分数据源，不依赖渠道或路由配置。
-
-    判定规则（按优先级）：
-    - Grafana Unified Alerting：顶层存在 orgId（Grafana 独有）；或 version=="1" 且存在 state 或 title（Alertmanager 为 "4"）。
-    - Prometheus Alertmanager：无 orgId 且（version 存在且不为 "1"；或 有 groupKey 且 alerts）。
-    - 单条告警：仅有 labels/annotations 等单条结构。
+    只判断是哪个软件发来的：version "1" = Grafana，version "4" = Prometheus。
+    需含 alerts 数组才视为有效 webhook；其余交给路由按 receiver/alertname/severity 匹配。
     """
     if not isinstance(payload, dict):
         return WebhookFormat.UNKNOWN
-    # 1) Grafana：有 orgId 或 (version "1" 且 有 state/title)
-    if "orgId" in payload:
+    version = payload.get("version")
+    has_alerts = "alerts" in payload and isinstance(payload.get("alerts"), list)
+    if not has_alerts:
+        if "labels" in payload or "annotations" in payload:
+            return WebhookFormat.SINGLE_ALERT
+        return WebhookFormat.UNKNOWN
+    if version == "1":
         return WebhookFormat.GRAFANA_UNIFIED_ALERTING
-    if payload.get("version") == "1" and ("state" in payload or "title" in payload):
-        return WebhookFormat.GRAFANA_UNIFIED_ALERTING
-    # 2) Prometheus Alertmanager：无 orgId，且 version 非 "1" 或 具备 groupKey+alerts
-    if "orgId" not in payload and "alerts" in payload:
-        if payload.get("version") not in (None, "1"):
-            return WebhookFormat.PROMETHEUS_ALERTMANAGER
-        if "groupKey" in payload:
-            return WebhookFormat.PROMETHEUS_ALERTMANAGER
-    # 3) 单条告警或未知
-    if "labels" in payload or "annotations" in payload:
-        return WebhookFormat.SINGLE_ALERT
+    if version == "4":
+        return WebhookFormat.PROMETHEUS_ALERTMANAGER
     return WebhookFormat.UNKNOWN
 
 
@@ -81,18 +71,21 @@ def parse_single_alert(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def normalize(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    统一解析入口：先按 payload 结构识别数据源，再调用对应解析器。
-    数据源识别仅在此处根据 payload 完成，解析器负责写入 _source，路由据此分发。
+    统一解析入口：先判断来源（version 1/4），再调用对应 adapter 解析，最后由 normalizer 写入 _source。
     """
     format_type = identify_data_source(payload)
     logger.debug(f"识别数据源类型: {format_type.value}")
     
     if format_type == WebhookFormat.PROMETHEUS_ALERTMANAGER:
         alerts = parse_prometheus(payload)
+        for a in alerts:
+            a["_source"] = "prometheus"
         logger.info(f"Prometheus Alertmanager 解析完成，共 {len(alerts)} 条告警")
         return alerts
     elif format_type == WebhookFormat.GRAFANA_UNIFIED_ALERTING:
         alerts = parse_grafana(payload)
+        for a in alerts:
+            a["_source"] = "grafana"
         logger.info(f"Grafana Unified Alerting 解析完成，共 {len(alerts)} 条告警")
         return alerts
     elif format_type == WebhookFormat.SINGLE_ALERT:

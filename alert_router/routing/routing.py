@@ -24,21 +24,10 @@ def _regex_search(pattern: str, text: str) -> bool:
 
 def match(labels: Dict[str, str], cond: Dict[str, str]) -> bool:
     """
-    匹配路由条件，支持正则表达式
-    
-    支持的正则格式：
-    1. 完整正则表达式：以 ".*" 开头和结尾，如 ".*pattern.*"
-    2. 开头匹配：以 ".*" 开头，如 ".*pattern"
-    3. 结尾匹配：以 ".*" 结尾，如 "pattern.*"
-    4. Alertmanager 风格：直接使用正则，如 "Jenkins.*|jenkins.*"（自动识别）
-    5. 精确匹配：普通字符串
-    
-    Args:
-        labels: 告警标签字典
-        cond: 匹配条件字典
-    
-    Returns:
-        bool: 是否匹配
+    匹配路由条件：receiver、alertname、severity/级别 等，支持正则与中文。
+
+    支持的正则格式：.*pattern.*、^...$、pattern1|pattern2 等；否则精确匹配。
+    中文完全支持，如 severity: "严重"、severity: "critical|灾难"。
     """
     for k, v in cond.items():
         label_value = labels.get(k)
@@ -128,12 +117,9 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
                     logger.warning("发现多个 default 规则，仅使用第一个默认规则")
                     _DEFAULT_RULE_WARNED = True
     
-    # 默认渠道：仅当「完全没匹配到任何规则」时使用（兜底）
-    # 有匹配的规则时，不再叠加 default，由各 match 规则自行包含「默认渠道」
     if not channels:
         if default_channels:
             channels.update(default_channels)
         else:
             logger.warning("未找到匹配规则且无默认规则，告警将无法发送")
-    
     return list(channels)

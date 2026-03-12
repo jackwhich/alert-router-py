@@ -49,7 +49,7 @@
 }
 ```
 
-**识别依据（代码里用到的）**：无 `orgId`，且 `version` 存在且不为 `"1"`，或 有 `groupKey` + `alerts`。
+**识别依据（代码里用到的）**：有 `alerts` 且 **`version == "4"`**（与 Grafana 的 `"1"` 严格区分）。
 
 ---
 
@@ -106,7 +106,7 @@
 }
 ```
 
-**识别依据（代码里用到的）**：顶层存在 `orgId`，**或** `version == "1"` 且存在 `state` 或 `title`。
+**识别依据（代码里用到的）**：有 `alerts` 且 **`version == "1"`**；或 有 `orgId` 且 `alerts`（部分 payload 可能无 version）。
 
 ---
 
@@ -115,12 +115,11 @@
 | 判断 | Prometheus Alertmanager | Grafana Unified Alerting |
 |------|-------------------------|---------------------------|
 | **version** | `"4"` | `"1"` |
-| **orgId** | 无 | 有（数字） |
-| **state** | 无 | 有（如 `alerting`） |
-| **title** | 无 | 有（如 `[FIRING:1] ...`） |
-| **groupKey + alerts** | 有 | 也有（不能单靠这个区分） |
+| **orgId** | 无 | 有（数字，如 1） |
+| **state / title** | 无 | 常有（Grafana 独有，非必须） |
+| **groupKey + alerts** | 有 | 也有（不能单靠这个区分，以 version 为准） |
 
-代码里在 `alert_router/adapters/alert_normalizer.py` 的 `identify_data_source(payload)` 中按上表规则做**数据源识别**，解析后由各 adapter 写入 `_source: "prometheus"` 或 `_source: "grafana"`，路由再根据 `_source` 等标签选择渠道。
+代码识别（先识别渠道再发送）：在 `alert_router/adapters/alert_normalizer.py` 的 `identify_data_source(payload)` 中**严格按 version**：`version == "1"` 且含 `alerts` → Grafana；`version == "4"` 且含 `alerts` → Prometheus；有 `orgId` 且含 `alerts` 时兜底为 Grafana。解析后由对应 adapter 写入 `_source`，路由仅按 receiver、alertname 等匹配，无匹配则不发送。
 
 ## 4. 数据源识别流程
 

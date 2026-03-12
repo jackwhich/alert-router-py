@@ -1,6 +1,6 @@
 server:
   host: 0.0.0.0
-  port: 8080
+  port: 9600
 
 logging:
   log_dir: "logs"
@@ -15,25 +15,25 @@ logging:
 proxy_enabled: true
 
 proxy:
-  http: "socks5://10.8.16.64:13080"
-  https: "socks5://10.8.16.64:13080"
+  http: "socks5://x.8.x.x:33080"
+  https: "socks5://x.8.x.x:33080"
 
 # Prometheus 告警图片渲染
 prometheus_image:
   enabled: true
   # Prometheus API 地址，例如: http://prometheus:9090，如果为空则从 generatorURL 解析
-  prometheus_url: ""
+  prometheus_url: "http://x.x.x.x:9090"
   # 图片生成是否使用代理（默认 false，因为 Prometheus 通常是内网地址）
-  use_proxy: false
-  # 绘图引擎: "matplotlib" 中文显示稳定；"plotly" 更美观但 Kaleido 可能无法使用系统中文字体导致中文变方框
-  # 若 Plotly 下中文显示为方框，可改回 matplotlib
+  # 绘图引擎选择: "plotly" (推荐，更美观) 或 "matplotlib" (传统，兼容性好)
+  # 如果选择 plotly 但未安装，会自动回退到 matplotlib
   plot_engine: "matplotlib"
+  use_proxy: false
   lookback_minutes: 15
   step: "30s"
   timeout_seconds: 8
   max_series: 8
-  # 图例标签白名单：仅以下 label 会显示在趋势图图例中，不在此列表的一律不显示
-  # 按类型分组便于维护；未命中 profile 时使用此默认列表（已对照 dc-prometheus 规则补全）
+  # 图例标签白名单：仅以下 label 会显示在趋势图图例中，不在此列表的一律不显示（便于统一控制）
+  # 不配置则使用代码内默认：pod, container, device, mountpoint, fstype, instance, topic, consumergroup, service_name, jenkins_job, build_number, name, endpoint, node
   legend_label_whitelist:
     # K8s/容器
     - pod
@@ -87,17 +87,17 @@ prometheus_image:
     - kubernetes_namespace
     # 通用/TargetDown 等
     - service
-
 # Grafana 告警图片渲染
 grafana_image:
-  enabled: true
+  enabled: false
   # Grafana 地址，例如: http://grafana:3000（可选，如果未配置会从 generatorURL 自动提取）
   # 用于调用 Grafana 渲染服务生成图片（需要 Grafana 配置了渲染服务）
-  grafana_url: ""
+  grafana_url: "http://x.x.x.x:xxxx"
+  grafana_api_token:  "xxxxxxxx"
   # Prometheus API 地址，例如: http://prometheus:9090（可选，仅当 Grafana 使用 Prometheus 数据源时需要）
   # 如果未配置，将使用 Grafana 渲染服务生成图片
   # prometheus_url: ""
-  # 图片生成是否使用代理（默认 false，因为 Grafana/Prometheus 通常是内网地址）
+  # 图�����生成是否使用代理（默认 false，因为 Grafana/Prometheus 通常是内网地址）
   use_proxy: false
   lookback_minutes: 15
   step: "30s"
@@ -131,8 +131,8 @@ channels:
     type: telegram
     enabled: true
     image_enabled: true
-    bot_token: "8502571186:xxxxx"
-    chat_id: "-5134533386"
+    bot_token: "xxxxx:xxxxx-xxxxxx"
+    chat_id: "-xxxxxx"
     template: "prometheus_telegram.html.j2"
 
   prometheus_telegram_critical:
@@ -140,30 +140,40 @@ channels:
     enabled: false
     image_enabled: false
     bot_token: "123456:AAxxxx"
-    chat_id: "-1001234567890"
+    chat_id: "-xxxxx"
     template: "prometheus_telegram.html.j2"
 
   prometheus_slack:
     type: slack
     enabled: true
-    webhook_url: "https://hooks.slack.com/services/T000/B000/XXX"
+    image_enabled: true
+    webhook_url: "https://hooks.slack.com/services/Txxxxxxxxx/xxxxxx"
     template: "prometheus_slack.json.j2"
 
   # Grafana 告警渠道
   grafana_telegram_default:
     type: telegram
     enabled: true
-    image_enabled: true
-    bot_token: "8502571186:xxxxx"
-    chat_id: "-5134533386"
+    image_enabled: false
+    bot_token: "8502571186:AAFqy849KL-xxxxxxx"
+    chat_id: "-xxxxx"
+    template: "grafana_telegram.html.j2"
+
+  # 提币监控告警-人工审核告警-订单进入人工审核
+  grafana_risk_withdrawal_order_telegram_default:
+    type: telegram
+    enabled: true
+    image_enabled: false
+    bot_token: "xxxxx:AAFqy849KL-YdNykyE7KcPvYpoCRpNYH4Mc"
+    chat_id: "-xxx"
     template: "grafana_telegram.html.j2"
 
   grafana_telegram_critical:
     type: telegram
     enabled: false
     image_enabled: false
-    bot_token: "8502571186:xxxxx"
-    chat_id: "-5134533386"
+    bot_token: "xxxx:xxxxx"
+    chat_id: "-51345xxx33386"
     template: "grafana_telegram.html.j2"
 
   grafana_slack:
@@ -179,39 +189,32 @@ channels:
     type: telegram
     enabled: true
     image_enabled: false
-    bot_token: "8502571186:xxxxx"
-    chat_id: "-5134533386"
+    bot_token: "xxxx:xx-xxxxx"
+    chat_id: "-xxxxx"
     template: "prometheus_telegram_jenkins.html.j2"
     send_resolved: false
 
-# 路由：所有告警发默认渠道；severity=critical/灾难 时额外发灾难渠道（共 2 个渠道）
+# 路由：先识别来源（Grafana version 1 / Prometheus version 4），再按 _receiver、alertname、severity/级别 匹配；支持中文（如 "严重"、"灾难"）；无匹配则不发送
 routing:
-  # Jenkins 告警（Prometheus 来源）走专用模板/群组
   - match:
-      _source: "prometheus"
       _receiver: "Prometheus"
     send_to: ["prometheus_telegram_default"]
 
-  # 告警来源 = Prometheus（支持 critical 或 灾难）
   - match:
-      _source: "prometheus"
+      _receiver: "Prometheus"
       alertname: "^(?!Jenkins|jenkins).*"
       severity: "critical|灾难"
     send_to: ["prometheus_telegram_critical"]
 
   - match:
-      _source: "prometheus"
+      _receiver: "prod-ebpay"
+    send_to: ["prometheus_slack"]
+
+  - match:
       _receiver: "prod_ebpay_jenkins_alarm"
       alertname: ".*Jenkins.*|.*jenkins.*"
     send_to: ["prometheus_telegram_jenkins"]
 
-  # 告警来源 = Grafana（支持 critical 或 灾难）
   - match:
-      _source: "grafana"
-      severity: "critical|灾难"
-    send_to: ["grafana_telegram_critical"]
-
-  - match:
-      _source: "grafana"
-    send_to: ["grafana_telegram_default"]
-
+      _receiver: "Withdrawal_Monitoring_Review_Manual_Review_Orders_Entering_Manual_Review"
+    send_to: ["grafana_risk_withdrawal_order_telegram_default"]

@@ -103,9 +103,8 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 annotations=annotations,
                 include_fingerprint=True,
             )
-            alert_obj["_source"] = "grafana"
-            # 与 Prometheus adapter 一致：将 payload 顶层 receiver 写入告警，供路由按 _receiver 匹配
-            receiver_name = payload.get("receiver")
+            # 解析只写 _receiver；_source 由 normalizer 按判断结果统一写入
+            receiver_name = payload.get("receiver") or payload.get("Receiver") or ""
             if receiver_name:
                 alert_obj["_receiver"] = receiver_name
             alerts.append(alert_obj)
