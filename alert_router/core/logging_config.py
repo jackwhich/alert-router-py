@@ -45,8 +45,9 @@ def _log_record_factory(
     name, level, fn, lno, msg, args, exc_info, func=None, extra=None, sinfo=None
 ) -> logging.LogRecord:
     """自定义 LogRecord 工厂：在创建记录时注入调用处的类名。"""
+    # 标准库 LogRecord 只接受 9 个位置参数（不含 extra），多传会触发 TypeError
     record = _ORIGINAL_RECORD_FACTORY(
-        name, level, fn, lno, msg, args, exc_info, func, extra, sinfo
+        name, level, fn, lno, msg, args, exc_info, func, sinfo
     )
     record.code_class = _get_caller_class_name()
     return record
