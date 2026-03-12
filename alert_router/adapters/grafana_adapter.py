@@ -104,6 +104,10 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 include_fingerprint=True,
             )
             alert_obj["_source"] = "grafana"
+            # 与 Prometheus adapter 一致：将 payload 顶层 receiver 写入告警，供路由按 _receiver 匹配
+            receiver_name = payload.get("receiver")
+            if receiver_name:
+                alert_obj["_receiver"] = receiver_name
             alerts.append(alert_obj)
     else:
         logger.warning("Grafana payload 中 alerts 字段不存在或不是列表类型")
