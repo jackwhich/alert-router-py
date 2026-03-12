@@ -3,10 +3,33 @@
 本服务用于接收 **Prometheus Alertmanager** 和 **Grafana Unified Alerting** 的 Webhook，  
 根据 **labels** 做路由分发，并对 **不同告警渠道（Telegram / Slack）** 进行统一模板化发送。
 
+---
+
+## 目录
+
+- [环境要求](#环境要求)
+- [快速开始](#快速开始)
+- [完整流程图](#完整流程图)
+- [目录结构](#目录结构)
+- [架构说明](#架构说明)
+- [数据源说明](#数据源说明)
+- [路由与流程详解](#路由与流程详解)
+- [功能特性](#功能特性)
+- [配置说明与模板示例](#配置说明与模板示例)
+- [告警重复排查](#告警重复排查)
+- [Telegram 发送失败排查](#telegram-发送失败排查)
+- [兼容性说明](#兼容性说明)
+- [启动脚本与日志](#启动脚本与日志)
+- [开发指南](#开发指南)
+
+---
+
 ## 环境要求
 
 - **Python 3.9**（推荐）或 Python 3.8+
 - pip 包管理器
+
+---
 
 ## 快速开始
 
@@ -26,7 +49,7 @@ python3.9 -m pip install -r scripts/requirements.txt
 pip3 install -r scripts/requirements.txt
 ```
 
-### 2. 配置
+### 3. 配置
 
 直接编辑根目录下的 `config.yaml`（建议在本地环境中维护，并在生产环境通过配置管理下发）。  
 也可以通过环境变量 `CONFIG_FILE` 指定配置文件路径。
@@ -43,49 +66,27 @@ channels:
     template: "telegram.md.j2"
 ```
 
-### 3. 启动服务
+### 4. 启动服务
 
 #### 方式一：使用启动脚本（推荐）
 
 ```bash
-# 启动服务
 ./scripts/start.sh start
-
-# 停止服务（优雅关闭）
-./scripts/start.sh stop
-
-# 重启服务
-./scripts/start.sh restart
-
-# 查看状态
-./scripts/start.sh status
-
-# 查看日志
-./scripts/start.sh logs
+./scripts/start.sh stop    # 停止
+./scripts/start.sh restart # 重启
+./scripts/start.sh status  # 状态
+./scripts/start.sh logs    # 日志
 ```
 
 #### 方式二：使用 systemd（生产环境推荐）
 
 ```bash
-# 1. 复制服务文件
 sudo cp scripts/alert-router.service /etc/systemd/system/
-
-# 2. 修改服务文件中的路径和用户
-sudo vi /etc/systemd/system/alert-router.service
-
-# 3. 重载 systemd 配置
+sudo vi /etc/systemd/system/alert-router.service  # 修改路径和用户
 sudo systemctl daemon-reload
-
-# 4. 启动服务
 sudo systemctl start alert-router
-
-# 5. 设置开机自启
 sudo systemctl enable alert-router
-
-# 6. 查看状态
 sudo systemctl status alert-router
-
-# 7. 查看日志
 sudo journalctl -u alert-router -f
 ```
 
@@ -95,13 +96,174 @@ sudo journalctl -u alert-router -f
 python3.9 -m uvicorn app:app --host 0.0.0.0 --port 8080 --workers 4
 ```
 
-### 4. 配置 Webhook
+### 5. 配置 Webhook
 
 在 Grafana 或 Prometheus Alertmanager 中配置 Webhook URL：
 
 ```
 http://<your-host>:8080/webhook
 ```
+
+---
+
+## 完整流程图
+
+### 1. 主流程：判断 → 解析 → 匹配 → 发送
+
+```mermaid
+flowchart TB
+    subgraph 入口
+        A[POST webhook 收到 JSON payload]
+    end
+
+    subgraph 判断
+        B[看 payload 顶层 version]
+        C{有 alerts 且 version?}
+        D[version 为 1]
+        E[version 为 4]
+        F[其他或无 version]
+        G[Grafana]
+        H[Prometheus]
+        I[UNKNOWN]
+        B --> C
+        C -->|是| D
+        C -->|否| F
+        D --> G
+        E --> H
+        F --> I
+    end
+
+    subgraph 解析
+        J[Grafana adapter 解析]
+        K[Prometheus adapter 解析]
+        L[写出 _receiver 等]
+        G --> J
+        H --> K
+        J --> L
+        K --> L
+    end
+
+    subgraph 匹配
+        M[拼 match_labels]
+        N[遍历 config routing 规则]
+        O{规则 match}
+        P[_receiver alertname severity]
+        Q[支持中文与正则]
+        R[得到 send_to 渠道]
+        L --> M
+        M --> N
+        N --> O
+        O --> P
+        P --> Q
+        Q --> R
+    end
+
+    subgraph 发送
+        S[按渠道取 template]
+        T[渲染并发 Telegram Slack]
+        R --> S
+        S --> T
+    end
+
+    A --> B
+    L --> M
+    R --> S
+```
+
+### 2. 数据源识别流程
+
+```mermaid
+flowchart TD
+    A[Webhook 请求] --> B[alert_normalizer.identify_data_source]
+    B --> C{有 orgId?}
+    C -->|是| D[Grafana Unified Alerting]
+    C -->|否| E{version == '1' 且 有 state/title?}
+    E -->|是| D
+    E -->|否| F{version != '1' 且 有 groupKey + alerts?}
+    F -->|是| G[Prometheus Alertmanager]
+    F -->|否| H[单条告警或未知格式]
+    D --> I[调用 grafana adapter.parse]
+    G --> J[调用 prometheus adapter.parse]
+    H --> K[对应处理]
+    I --> L[写入 _source 标签]
+    J --> L
+    L --> M[路由模块根据 _source 等标签分发]
+```
+
+### 3. 系统架构分层
+
+```mermaid
+flowchart TB
+    subgraph HTTP层
+        A[app.py - FastAPI 路由、请求处理、生命周期]
+    end
+
+    subgraph 服务层
+        B[AlertService - 告警处理核心]
+        C[ImageService - 图片生成]
+        D[ChannelFilter - 渠道过滤]
+    end
+
+    subgraph 适配器层
+        E[alert_normalizer - 统一解析入口]
+        F[grafana_adapter / prometheus_adapter]
+    end
+
+    subgraph 基础设施层
+        G[routing - 路由匹配]
+        H[senders - 消息发送]
+        I[templates - 模板渲染]
+        J[plotters - 图片生成]
+    end
+
+    A --> B
+    A --> C
+    A --> D
+    B --> E
+    B --> G
+    B --> H
+    B --> I
+    C --> J
+    E --> F
+```
+
+### 4. 告警处理端到端流程
+
+```mermaid
+flowchart TD
+    A[Webhook 请求到达] --> B[app.py 解析 JSON]
+    B --> C[AlertService.process_webhook]
+    C --> D[alert_normalizer.normalize - 识别数据源并解析]
+    D --> E[遍历每条告警]
+    E --> F{Jenkins 去重?}
+    F -->|命中| G[跳过]
+    F -->|未命中| H[routing.route - 路由匹配]
+    H --> I{需要图片?}
+    I -->|是| J[ImageService.generate_image]
+    I -->|否| K[按渠道发送]
+    J --> K
+    K --> L[template_renderer.render]
+    L --> M[senders.send_telegram / send_webhook]
+    M --> N[返回处理结果]
+    G --> N
+```
+
+### 5. 图片生成流程
+
+```mermaid
+flowchart TD
+    A[检查 source、image_enabled、渠道类型] --> B[ImageService.generate_image]
+    B --> C{数据源?}
+    C -->|Prometheus| D[prometheus_plotter.generate_plot_from_generator_url]
+    C -->|Grafana| E[grafana_plotter.generate_plot_from_grafana_generator_url]
+    D --> F[从 generatorURL 提取查询表达式]
+    E --> F
+    F --> G[调用 Prometheus/Grafana API 获取数据]
+    G --> H[Plotly/Matplotlib 生成图片]
+    H --> I[返回图片字节]
+```
+
+---
 
 ## 目录结构
 
@@ -111,45 +273,14 @@ alert-router-py/
 ├── config.yaml                     # 配置文件
 │
 ├── alert_router/                   # 核心模块包
-│   ├── __init__.py                # 包初始化（向后兼容导出）
-│   │
-│   ├── core/                      # 核心功能模块
-│   │   ├── __init__.py
-│   │   ├── config.py             # 配置加载
-│   │   ├── models.py             # 数据模型
-│   │   ├── logging_config.py     # 日志配置
-│   │   └── utils.py              # 工具函数
-│   │
-│   ├── adapters/                  # 数据源适配器
-│   │   ├── __init__.py
-│   │   ├── alert_normalizer.py   # 统一解析入口（告警标准化）
-│   │   ├── grafana_adapter.py    # Grafana Unified Alerting 适配器
-│   │   └── prometheus_adapter.py # Prometheus Alertmanager 适配器
-│   │
-│   ├── services/                  # 业务服务层
-│   │   ├── __init__.py
-│   │   ├── alert_service.py      # 告警处理服务（核心业务逻辑）
-│   │   ├── image_service.py      # 图片生成服务
-│   │   └── channel_filter.py     # 渠道过滤服务
-│   │
-│   ├── plotters/                  # 绘图模块
-│   │   ├── __init__.py
-│   │   ├── base.py               # 公共绘图工具
-│   │   ├── prometheus_plotter.py # Prometheus 绘图器
-│   │   └── grafana_plotter.py    # Grafana 绘图器
-│   │
-│   ├── routing/                   # 路由模块
-│   │   ├── __init__.py
-│   │   ├── routing.py            # 路由匹配逻辑
-│   │   └── jenkins_dedup.py      # Jenkins 去重逻辑
-│   │
-│   ├── senders/                   # 消息发送模块
-│   │   ├── __init__.py
-│   │   └── senders.py            # 发送器实现（HTTP 连接池优化）
-│   │
-│   └── templates/                 # 模板渲染模块
-│       ├── __init__.py
-│       └── template_renderer.py  # 模板渲染器
+│   ├── __init__.py
+│   ├── core/                       # 核心功能（config, models, logging, utils）
+│   ├── adapters/                   # 数据源适配器（alert_normalizer, grafana, prometheus）
+│   ├── services/                   # 业务服务（alert_service, image_service, channel_filter）
+│   ├── plotters/                   # 绘图（base, prometheus_plotter, grafana_plotter）
+│   ├── routing/                    # 路由匹配、Jenkins 去重
+│   ├── senders/                    # 发送器（Telegram/Slack，连接池）
+│   └── templates/                  # 模板渲染
 │
 ├── templates/                      # Jinja2 模板文件
 │   ├── grafana_slack.json.j2
@@ -158,193 +289,245 @@ alert-router-py/
 │   ├── prometheus_telegram.html.j2
 │   └── prometheus_telegram_jenkins.html.j2
 │
-├── scripts/                        # 脚本目录
-│   ├── requirements.txt           # Python 依赖
-│   ├── start.sh                   # 启动脚本（支持优雅重启）
-│   ├── test-alertmanager.sh       # 测试发送告警到 Alertmanager
-│   ├── test-webhook.sh            # 测试 webhook 的示例脚本
-│   └── alert-router.service       # systemd 服务文件
-│
-├── docs/                           # 文档目录
-│   ├── COMPATIBILITY.md           # 新旧实现兼容性说明
-│   ├── DATA_SOURCES.md            # 数据源格式说明
-│   └── template-examples.md       # 模板与配置示例
-│
-├── archive/                        # 归档目录（旧代码）
-│   └── old_py/                     # 旧版本代码归档
-│
+├── scripts/                        # 脚本（requirements.txt, start.sh, test-*.sh, systemd）
+├── archive/                        # 归档（旧代码）
 ├── logs/                           # 日志目录（自动创建）
-│   └── alert-router.log           # 日志文件
-│
-└── README.md                       # 说明文档
+└── README.md                       # 本文档
 ```
 
-### 架构说明
+---
 
-项目采用模块化设计，按功能划分为以下模块：
+## 架构说明
 
-- **core/**: 核心功能模块（配置、模型、日志、工具函数）
-- **adapters/**: 数据源适配器（支持 Prometheus 和 Grafana）
-- **services/**: 业务服务层（告警处理、图片生成、渠道过滤）
-- **plotters/**: 绘图模块（统一管理绘图相关代码）
-- **routing/**: 路由模块（路由匹配、Jenkins/Grafana 去重）
-- **senders/**: 消息发送模块（HTTP 连接池优化）
-- **templates/**: 模板渲染模块
+- **HTTP 层** (`app.py`): 路由与请求处理，业务委托给服务层。
+- **服务层** (`services/`): AlertService 告警处理、ImageService 图片生成、ChannelFilter 渠道过滤。
+- **适配器层** (`adapters/`): 通过 `identify_data_source()` 识别数据源，再调用对应 adapter 解析，输出统一格式（含 `_source`）。
+- **基础设施层**: routing 路由匹配、senders 发送（连接池）、templates 渲染、plotters 绘图。
 
-这种模块化设计使得代码结构清晰，易于维护和扩展。
+设计原则：单一职责、开闭原则（新数据源/新渠道通过适配器与配置扩展）、DRY、关注点分离。
+
+---
+
+## 数据源说明
+
+### Prometheus Alertmanager
+
+- **识别**：顶层 `version == "4"` 且含 `alerts` 数组。
+- **典型字段**：`version`, `groupKey`, `receiver`, `status`, `groupLabels`, `commonLabels`, `commonAnnotations`, `externalURL`, `alerts`。无 `orgId`、`state`、`title`、`message`。
+
+### Grafana Unified Alerting
+
+- **识别**：`version == "1"` 且含 `alerts`；或含 `orgId` 且含 `alerts`。
+- **典型字段**：`version`, `orgId`, `state`, `title`, `message`, `receiver`, `alerts`，单条告警可有 `fingerprint`, `silenceURL`, `dashboardURL`, `valueString` 等。
+
+### 区分小结
+
+| 判断       | Prometheus | Grafana   |
+|------------|------------|-----------|
+| version    | `"4"`      | `"1"`     |
+| orgId      | 无         | 有        |
+| state/title| 无         | 常有      |
+
+解析后由对应 adapter 写入 `_source: "prometheus"` 或 `_source: "grafana"`，路由据此及 `_receiver`、`alertname`、`severity` 等匹配。
+
+---
+
+## 路由与流程详解
+
+| 阶段 | 位置 | 作用 | 依据 |
+|------|------|------|------|
+| **判断** | `alert_normalizer.identify_data_source(payload)` | 决定用哪个 adapter 解析 | 顶层 **version**（"1"=Grafana，"4"=Prometheus）+ 是否有 **alerts** |
+| **解析** | `parse_grafana` / `parse_prometheus`，normalizer 写 _source | 输出统一 labels、_receiver、_source | 对应 adapter 只写 labels/_receiver，normalizer 补 _source |
+| **匹配** | `routing.route(match_labels, config)`、`match(labels, rule["match"])` | 得到要发到哪些渠道 | match_labels = labels + _receiver + _source；规则支持中文与正则；无匹配则不发送 |
+| **发送** | `alert_service` | 按渠道取 template，渲染后发 Telegram/Slack | 渠道在 config 的 channels 中，含 template、bot_token 等 |
+
+简化文字流：
+
+```
+Webhook 入参
+  → 判断：version "1" ? Grafana : version "4" ? Prometheus : 未知
+  → 解析：对应 adapter 产出告警列表（含 _receiver、_source、labels）
+  → 匹配：用 _receiver/alertname/severity 等对 config routing 逐条 match，得到 send_to
+  → 发送：按渠道 template 渲染并发送
+```
+
+---
 
 ## 功能特性
 
 ### 核心功能
-- ✅ 自动识别 Prometheus Alertmanager 和 Grafana Unified Alerting 格式
-- ✅ 灵活的 YAML 配置路由规则
-- ✅ 支持渠道开关控制（enabled）
-- ✅ 按来源（Grafana/Prometheus）区分群组
-- ✅ 按告警级别（severity）路由
-- ✅ 模板化消息格式（Jinja2）
-- ✅ 模块化设计，易于扩展
-- ✅ 完善的日志系统（文件输出 + 日志轮转）
-- ✅ 优雅关闭和重启支持
+
+- 自动识别 Prometheus Alertmanager 与 Grafana Unified Alerting 格式
+- 灵活 YAML 路由规则，渠道开关（enabled）
+- 按来源/级别路由，Jinja2 模板化消息，模块化易扩展
+- 完善日志（文件 + 轮转）、优雅关闭与重启
 
 ### 高级特性
-- ✅ **图片生成**：支持 Prometheus 和 Grafana 告警趋势图生成（Plotly/Matplotlib）
-- ✅ **Jenkins 去重**：智能去重 Jenkins 告警，避免重复通知
-- ✅ **Grafana 去重**：同一告警（fingerprint+状态）在时间窗口内只发一次，避免重复两条（见 [告警重复排查](docs/DUPLICATE_ALERTS.md)）
-- ✅ **HTTP 连接池**：使用连接池复用连接，提升性能
-- ✅ **服务层架构**：业务逻辑与 HTTP 层分离，便于测试和维护
-- ✅ **渠道过滤**：统一的渠道过滤逻辑，支持图片渠道筛选
-- ✅ **代理支持**：支持 HTTP/SOCKS5 代理，可配置全局或渠道级别代理
 
-## 启动脚本说明
+- **图片生成**：Prometheus/Grafana 趋势图（Plotly/Matplotlib）
+- **Jenkins 去重**：同一类 Jenkins 告警在时间窗口内只发一次
+- **Grafana 去重**：同一 fingerprint+状态在窗口内只发一次（见 [告警重复排查](#告警重复排查)）
+- **HTTP 连接池**：连接复用
+- **渠道过滤**：统一过滤逻辑，支持图片渠道筛选
+- **代理**：支持 HTTP/SOCKS5，可全局或按渠道配置
 
-启动脚本 `scripts/start.sh` 支持以下命令：
+---
 
-- `start` - 启动服务
-- `stop` - 停止服务（优雅关闭，等待最多 30 秒）
-- `restart` - 重启服务
-- `status` - 查看服务状态和进程信息
-- `logs` - 实时查看日志
-- `reload` - 重载配置（重启服务）
+## 配置说明与模板示例
+
+### 路由规则示例
+
+```yaml
+routing:
+  - match:
+      _source: "prometheus"
+      severity: "critical|灾难"
+    send_to: ["prometheus_telegram_default", "prometheus_slack"]
+  - match:
+      _source: "grafana"
+    send_to: ["grafana_telegram"]
+  - default: true
+    send_to: ["fallback_channel"]
+```
+
+### 渠道与模板
+
+- Telegram：`config.yaml` 中指定 `template: "prometheus_telegram.html.j2"` 等。
+- Slack：使用 `prometheus_slack.json.j2` / `grafana_slack.json.j2`，支持 Block Kit、告警/恢复时间、description、@mention、按钮链接。
+
+模板变量：`title`, `status`, `labels.*`, `annotations.*`, `startsAt`, `endsAt`, `generatorURL`。常用过滤器：`default('-')`, `upper`, `lower`。
+
+模板文件位置：项目根目录 `templates/`（如 `prometheus_telegram.html.j2`, `grafana_telegram.html.j2`, `prometheus_telegram_jenkins.html.j2` 等）。渲染逻辑在 `alert_router/templates/template_renderer.py`，含时间转换与 URL 处理。
+
+### 图片与去重配置示例
+
+```yaml
+prometheus_image:
+  enabled: true
+  prometheus_url: "http://prometheus:9090"
+  plot_engine: "plotly"
+  lookback_minutes: 15
+  timeout_seconds: 8
+
+grafana_dedup:
+  enabled: true
+  ttl_seconds: 90
+  clear_on_resolved: true
+
+jenkins_dedup:
+  enabled: true
+  ttl_seconds: 900
+  clear_on_resolved: true
+```
+
+---
+
+## 告警重复排查
+
+**同一条告警收到 2 条** 的常见原因与处理：
+
+1. **Grafana 侧重复投递**（最常见）  
+   同一告警被多个路由/联系点命中，同一 webhook 被调多次。  
+   **处理**：在 Grafana Alerting → Contact points / Notification policies 中确保同一 webhook 只在一个联系点、且每条告警只命中一条「发到该 webhook」的路径；并开启本项目的 **Grafana 去重**。
+
+2. **同一 payload 内重复条目**  
+   极少数情况下 `alerts` 数组中有相同 fingerprint 或高度相似条目。  
+   **处理**：开启 Grafana 去重后，第二条会在发送前被过滤。
+
+3. **多实例重复**  
+   多进程/多实例部署且上游对同一告警请求了多个实例。  
+   **处理**：Webhook 只配置一个入口（或负载均衡单一入口）；或单实例部署。当前 Grafana 去重为进程内缓存，多实例间不去重。
+
+**Grafana 去重配置**（推荐开启）：
+
+```yaml
+grafana_dedup:
+  enabled: true
+  ttl_seconds: 90
+  clear_on_resolved: true
+```
+
+日志中出现「Grafana 去重：同一条告警在窗口内已发送过，跳过」即表示重复已拦截。
+
+---
+
+## Telegram 发送失败排查
+
+1. **图片 400（sendPhoto）**  
+   趋势图非有效 PNG（超时、无数据、错误页）。当前逻辑会校验长度与 PNG 魔数，不符合则改为发文本。请确认已部署含该校验的版本。
+
+2. **chat_id / Bot 权限（400）**  
+   检查 `chat_id`（数字或 `-100xxxxxxxxxx`、`@channel`）、Bot 是否在群/频道内且未被禁用。日志中「Telegram API 响应说明」会给出具体原因。
+
+3. **HTML 解析错误（400 + "can't parse entities"）**  
+   使用 `parse_mode=HTML` 时未转义 `<`、`>`、`&`。当前在 400 且使用 parse_mode 时会自动用纯文本重试；若重试成功，可在模板中对变量做 HTML 转义。
+
+4. **无「Telegram API 响应说明」**  
+   多为未部署最新代码，拉取最新代码并重启后再复现，即可看到 API 返回的 description 便于定位。
+
+---
+
+## 兼容性说明
+
+- **已实现**：Prometheus/Grafana/单条告警解析；基于 labels 的路由（精确与正则）；Telegram/Slack/Webhook；send_resolved 控制；UTC→CST；全局/渠道代理；Jinja2 模板；文件日志与轮转；优雅关闭与 systemd。
+- **迁移注意**：多 Webhook 需配置多个 channel；告警聚合建议在 Alertmanager group_by 处理；模板中通过 `alert.values.B` 或 `valueString` 访问当前值。
+- **导入**：推荐 `from alert_router.core import load_config`、`from alert_router.adapters.alert_normalizer import normalize`；仍支持 `from alert_router import load_config` 等向后兼容导出。
+
+---
+
+## 启动脚本与日志
+
+### 启动脚本 `scripts/start.sh`
+
+- `start` / `stop` / `restart` / `status` / `logs` / `reload`
 
 ### 环境变量
 
-可以通过环境变量自定义配置：
-
 ```bash
-export PYTHON_CMD=python3.9  # Python 命令（默认: python3.9）
-export HOST=0.0.0.0          # 监听地址
-export PORT=8080             # 监听端口
-export WORKERS=4             # 工作进程数
-export TIMEOUT=30            # 超时时间（秒）
-
+export PYTHON_CMD=python3.9
+export HOST=0.0.0.0
+export PORT=8080
+export WORKERS=4
+export TIMEOUT=30
 ./scripts/start.sh start
 ```
 
-### 优雅关闭
-
-启动脚本支持优雅关闭：
-
-1. 发送 `SIGTERM` 信号给主进程
-2. uvicorn 会等待当前请求完成
-3. 最多等待 30 秒
-4. 如果超时，强制终止进程
-
-## 日志配置
-
-日志系统支持文件输出和日志轮转，配置在 `config.yaml` 中：
+### 日志配置（config.yaml）
 
 ```yaml
 logging:
-  log_dir: "logs"              # 日志目录
-  log_file: "alert-router.log" # 日志文件名
-  level: "INFO"                # 日志级别
-  max_bytes: 10485760          # 单个文件最大 10MB
-  backup_count: 5              # 保留 5 个备份文件
+  log_dir: "logs"
+  log_file: "alert-router.log"
+  level: "INFO"
+  max_bytes: 10485760
+  backup_count: 5
 ```
 
-日志文件会自动轮转，当日志文件达到 `max_bytes` 大小时，会自动创建新文件，并保留指定数量的备份文件。
+日志为 JSON 单行，必含 `time`, `level`, `traceId`, `message`；key 英文，message 中文。
 
-日志格式示例（JSON 单行）：
-```json
-{"time":"2026-03-12T22:11:25+08:00","level":"INFO","traceId":"trace-test-001","message":"收到告警 Webhook 请求","logger":"alert-router","file":"app.py","line":99}
-{"time":"2026-03-12T22:11:26+08:00","level":"INFO","traceId":"trace-test-001","message":"告警 HighCPU 已发送到渠道: tg_critical","logger":"alert-router","file":"alert_service.py","line":151}
-{"time":"2026-03-12T22:11:27+08:00","level":"ERROR","traceId":"trace-test-001","message":"告警 HighCPU 发送到渠道 slack_main 失败: 连接超时","logger":"alert-router","file":"alert_service.py","line":288}
-```
-
-当前日志规范：
-- 必含字段：`time`、`level`、`traceId`、`message`
-- key 使用英文，`message` 使用中文表达
-- 每条日志一行 JSON，便于日志平台采集和检索
-
-## 配置说明
-
-详细配置说明请参考 `docs/template-examples.md` 文档。
-
-## 代码架构
-
-### 架构设计
-
-项目采用分层架构设计：
-
-1. **HTTP 层** (`app.py`): 负责 HTTP 路由和请求处理
-2. **服务层** (`alert_router/services/`): 封装业务逻辑
-3. **适配器层** (`alert_router/adapters/`): 数据源适配和格式转换
-4. **基础设施层** (`alert_router/core/`, `routing/`, `senders/`, `templates/`): 提供基础功能
-
-### 性能优化
-
-- **HTTP 连接池**: 使用 `requests.Session` 实现连接复用，减少连接建立开销
-- **代码复用**: 提取公共代码，消除重复逻辑（约 300+ 行）
-- **模块化设计**: 按功能划分模块，便于维护和扩展
-
-### 代码质量
-
-- ✅ **单一职责**: 每个模块职责明确
-- ✅ **DRY 原则**: 消除重复代码
-- ✅ **可维护性**: 代码结构清晰，便于理解和修改
-- ✅ **可测试性**: 业务逻辑与 HTTP 层分离，便于单元测试
+---
 
 ## 开发指南
 
-### 导入模块
-
-推荐使用新的模块化导入方式：
+### 推荐导入
 
 ```python
-# 核心模块
 from alert_router.core import Channel, load_config, setup_logging
-
-# 服务层
 from alert_router.services import AlertService, ImageService
-
-# 路由
 from alert_router.routing import route, match
-
-# 发送器
 from alert_router.senders import send_telegram, send_webhook
-
-# 绘图器
 from alert_router.plotters import generate_plot_from_generator_url
 ```
 
-### 向后兼容
+### 测试
 
-为了保持向后兼容，仍然支持旧式导入：
-
-```python
-# 通过主包的 __init__.py 导出，仍然可以使用
-from alert_router import Channel, load_config, AlertService
+```bash
+./scripts/test-alertmanager.sh
+./scripts/test-webhook.sh
 ```
 
-## 相关文档
-
-- [快速开始](docs/QUICK_START.md) - 快速部署和配置指南
-- [架构设计](docs/ARCHITECTURE.md) - 架构设计和模块说明
-- [数据源格式](docs/DATA_SOURCES.md) - Prometheus 和 Grafana 数据源格式说明
-- [模板示例](docs/template-examples.md) - 模板和配置示例
-- [兼容性说明](docs/COMPATIBILITY.md) - 新旧代码兼容性对比
+---
 
 ## 许可证
 
 MIT License
-

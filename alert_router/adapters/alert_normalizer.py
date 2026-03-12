@@ -3,7 +3,7 @@
 
 - 判断：仅根据 payload 顶层 version（"1"=Grafana，"4"=Prometheus）与是否有 alerts 判定来源。
 - 解析：adapter 只写 _receiver、labels 等；normalizer 按判断结果统一写入 _source。
-- 路由：按 _receiver、alertname、severity 等匹配，见 config 与 docs/FLOW_ROUTING.md。
+- 路由：按 _receiver、alertname、severity 等匹配，见 config 与 README「路由与流程详解」。
 """
 import logging
 from typing import Dict, Any, List
