@@ -220,14 +220,12 @@ def _filter_result_by_alert_labels(
     return result
 
 
-def _legend_line_with_stats(label: str, ys: List[float]) -> str:
-    """借鉴参考图：图例第二行显示均值、最大、最小。"""
+def _legend_line_with_alert_value(label: str, ys: List[float]) -> str:
+    """图例仅展示当前告警值，避免过宽挤压绘图区。"""
     if not ys:
         return label
-    mean_y = sum(ys) / len(ys)
-    max_y = max(ys)
-    min_y = min(ys)
-    return f"{label}\n均值 {mean_y:.1f}  最大 {max_y:.1f}  最小 {min_y:.1f}"
+    alert_value = ys[-1]
+    return f"{label}\n告警值 {alert_value:.1f}"
 
 
 def _build_series_label(
@@ -287,6 +285,7 @@ def _generate_plot_with_plotly(
         ]
         
         plotted = 0
+        legend_labels: List[str] = []
         all_timestamps: List[datetime] = []  # 用于红线/阴影和 x 范围
         for idx, series in enumerate(result):
             values = series.get("values") or []
@@ -323,7 +322,7 @@ def _generate_plot_with_plotly(
                 series.get("metric") or {},
                 legend_label_whitelist=legend_label_whitelist,
             )
-            legend_label = _legend_line_with_stats(label, list(ys))
+            legend_label = _legend_line_with_alert_value(label, list(ys))
             color = colors[idx % len(colors)]
             
             # 将十六进制颜色转换为 rgba 格式（用于填充）
@@ -354,6 +353,7 @@ def _generate_plot_with_plotly(
                 fillcolor=hex_to_rgba(color, 0.2),
                 hovertemplate=f'<b>{label}</b><br>时间: %{{x}}<br>值: %{{y}}<extra></extra>',
             ))
+            legend_labels.append(legend_label)
             all_timestamps.extend(xs)
             plotted += 1
         
@@ -381,7 +381,8 @@ def _generate_plot_with_plotly(
         
         # 使用检测到的中文字体，避免标题/图例中文显示为方框
         plot_font_family = _get_cjk_font_family() or "Arial, sans-serif"
-        # 绘图区左侧约 72%，图例紧挨在右侧留白（不压红线），间距适中
+        
+        # 图例：垂直排列在右侧，无边框，紧凑
         fig.update_layout(
             title=dict(
                 text=chart_title,
@@ -391,7 +392,7 @@ def _generate_plot_with_plotly(
                 pad=dict(t=40),
             ),
             xaxis=dict(
-                domain=[0, 0.72],
+                domain=[0, 0.82],  # 主图占 82% 宽度
                 title=dict(text=xlabel_text, font=dict(size=14, color='#ffffff')),
                 tickfont=dict(size=11, color='#ffffff', family=plot_font_family),
                 gridcolor='rgba(255, 255, 255, 0.2)',
@@ -411,16 +412,17 @@ def _generate_plot_with_plotly(
             paper_bgcolor='#0a0a0f',
             font=dict(family=plot_font_family),
             legend=dict(
-                bgcolor='rgba(26, 26, 46, 0.98)',
-                bordercolor='rgba(255, 255, 255, 0.3)',
-                borderwidth=1,
-                font=dict(size=12, color='#ffffff', family=plot_font_family),
-                x=0.76,
-                y=0.5,
+                orientation="v",  # 垂直排列
+                bgcolor='rgba(0,0,0,0)',  # 透明背景
+                bordercolor='rgba(0,0,0,0)',  # 无边框
+                font=dict(size=11, color='#ffffff', family=plot_font_family),
+                x=0.83,  # 紧挨主图右侧
+                y=1.0,   # 顶部对齐
                 xanchor='left',
-                yanchor='middle',
+                yanchor='top',
+                traceorder="normal",
             ),
-            margin=dict(l=60, r=220, t=80, b=60),
+            margin=dict(l=60, r=20, t=80, b=60),  # 右侧 margin 减小，空间留给图例
             width=1400,
             height=700,
             hovermode='x unified',
@@ -472,6 +474,7 @@ def _generate_plot_with_matplotlib(
 
     fig, ax = plt.subplots(figsize=(14, 7), dpi=150)
     plotted = 0
+    legend_labels: List[str] = []
     time_axis_xs: List[datetime] = []
     colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e']
     if len(result) > len(colors):
@@ -507,7 +510,8 @@ def _generate_plot_with_matplotlib(
         )
         if not label or not label.strip():
             label = series.get("metric", {}).get("__name__", f"series_{idx}")
-        legend_label = _legend_line_with_stats(label, list(ys))
+        legend_label = _legend_line_with_alert_value(label, list(ys))
+        legend_labels.append(legend_label)
         color = colors[idx % len(colors)]
         ax.plot(xs, ys, linewidth=3.0, label=legend_label, color=color, marker='o', markersize=4, alpha=0.95, zorder=5 - idx)
         time_axis_xs = list(xs)
@@ -522,7 +526,8 @@ def _generate_plot_with_matplotlib(
     show_pct = ("使用率" in (alertname or "")) or ("CPU" in _an)
 
     chart_title = alertname if alertname else "Prometheus Alert Trend"
-    ax.set_title(chart_title, fontsize=20, fontweight='bold', pad=40, color='#ffffff')
+    # 标题按整张图居中，而不是按左侧坐标轴区域居中
+    fig.suptitle(chart_title, fontsize=20, fontweight='bold', color='#ffffff', y=0.98, x=0.5, ha='center')
 
     if alert_time:
         try:
@@ -561,28 +566,21 @@ def _generate_plot_with_matplotlib(
     ax.spines['left'].set_linewidth(2)
     ax.spines['bottom'].set_linewidth(2)
 
-    # 图例在指标图形外、紧挨绘图区右侧，间距适中
+    # 图例布局优化：垂直排列在右侧，无边框
     legend_obj = None
     if plotted > 0:
         legend_obj = ax.legend(
-            loc="center left",
-            bbox_to_anchor=(0.82, 0.5),
-            bbox_transform=fig.transFigure,
-            fontsize=11,
-            framealpha=0.98,
-            fancybox=True,
-            shadow=False,
-            edgecolor='#ffffff',
-            facecolor='#1a1a2e',
-            borderpad=1.2,
-            labelspacing=1.0,
-            handlelength=2.0,
-            handletextpad=0.8,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),  # 紧挨主图右侧，顶部对齐
+            fontsize=10,
+            frameon=False,  # 去掉图例边框
+            labelspacing=0.8,
+            handlelength=1.5,
+            handletextpad=0.5,
         )
         for text in legend_obj.get_texts():
             text.set_color('#ffffff')
             text.set_fontweight('normal')
-    extra_artists = [legend_obj] if legend_obj is not None else []
 
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S', tz=ZoneInfo("Asia/Shanghai")))
     if time_axis_xs:
@@ -608,9 +606,12 @@ def _generate_plot_with_matplotlib(
     cmap = LinearSegmentedColormap.from_list('custom', ['#0a0a0f', '#1a1a2e', '#2a2a3e'], N=256)
     ax.imshow(Z, extent=[x_min, x_max, y_min, y_max], aspect='auto', cmap=cmap, alpha=0.3, zorder=0, origin='lower')
 
-    # 绘图区约 72%，图例在 82% 处，紧挨右侧、不压红线
-    fig.subplots_adjust(right=0.72)
-    fig.tight_layout(pad=3.5, rect=[0, 0, 0.72, 1])
+    # 主图占 80% 宽度，右侧留给垂直图例
+    fig.subplots_adjust(left=0.08, right=0.80, top=0.90, bottom=0.15)
+    
+    # 确保图例不被裁剪
+    extra_artists = [legend_obj] if legend_obj else []
+    
     buffer = BytesIO()
     fig.savefig(
         buffer, format='png', dpi=150, facecolor='#0a0a0f', edgecolor='none',
