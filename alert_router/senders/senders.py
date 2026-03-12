@@ -232,7 +232,17 @@ def send_webhook(ch: Channel, body: str):
         # 如果不是有效的 JSON，则作为原始数据发送
         logger.debug(f"Webhook body 非 JSON，以原始数据发送 (渠道: {ch.name})")
         try:
-            response = _post_webhook(session, ch.webhook_url, ch.name, data=body, **kwargs)
+            # requests 在 data=str 时会按 latin-1 编码，中文/emoji 会触发 UnicodeEncodeError
+            # 回退路径强制使用 UTF-8 bytes，并显式声明 charset
+            utf8_headers = {"Content-Type": "application/json; charset=utf-8"}
+            response = _post_webhook(
+                session,
+                ch.webhook_url,
+                ch.name,
+                data=body.encode("utf-8"),
+                headers=utf8_headers,
+                **kwargs,
+            )
             return response
         except requests.exceptions.RequestException as e:
             _log_webhook_error(ch.name, e)
