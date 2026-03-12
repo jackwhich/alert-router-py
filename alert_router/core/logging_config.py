@@ -6,19 +6,50 @@
 已配置标记挂在 logger 上，避免模块被多次导入时重复添加 handler（同一条日志打两遍）。
 """
 
+import inspect
 import json
 import logging
+import os
 import sys
 import uuid
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 # 已配置标记存在 logger 上，保证同一 logger 只配置一次（即使用户或框架多次导入本模块）
 _ATTR_CONFIGURED = "_alert_router_logging_configured"
 _TRACE_ID_CTX: ContextVar[str] = ContextVar("alert_router_trace_id", default="-")
+_ORIGINAL_RECORD_FACTORY = logging.getLogRecordFactory()
+
+
+def _get_caller_class_name() -> Optional[str]:
+    """从当前调用栈中获取打日志处的类名（若在类方法内）。"""
+    try:
+        for frame_info in inspect.stack():
+            pathname = (frame_info.filename or "").replace(os.sep, "/")
+            if "logging" in pathname or "logging_config" in pathname:
+                continue
+            frame = frame_info.frame
+            if "self" in frame.f_locals:
+                self_obj = frame.f_locals["self"]
+                return type(self_obj).__name__
+            return None
+    except Exception:
+        pass
+    return None
+
+
+def _log_record_factory(
+    name, level, fn, lno, msg, args, exc_info, func=None, extra=None, sinfo=None
+) -> logging.LogRecord:
+    """自定义 LogRecord 工厂：在创建记录时注入调用处的类名。"""
+    record = _ORIGINAL_RECORD_FACTORY(
+        name, level, fn, lno, msg, args, exc_info, func, extra, sinfo
+    )
+    record.code_class = _get_caller_class_name()
+    return record
 
 
 def set_trace_id(trace_id: str) -> None:
@@ -43,15 +74,22 @@ class JsonFormatter(logging.Formatter):
     """统一 JSON 单行日志格式。"""
 
     def format(self, record: logging.LogRecord) -> str:
+        code_loc = f"{record.filename}:{record.lineno}"
+        code_class = getattr(record, "code_class", None)
+        if code_class:
+            code_value = f"{code_class} ({code_loc})"
+        else:
+            code_value = code_loc
         payload: Dict[str, Any] = {
             "time": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
             "level": record.levelname,
             "traceId": getattr(record, "traceId", "-"),
             "message": record.getMessage(),
             "logger": record.name,
-            "file": record.filename,
-            "line": record.lineno,
+            "code": code_value,
         }
+        if code_class:
+            payload["class"] = code_class
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)
@@ -80,6 +118,9 @@ def setup_logging(
     logger = logging.getLogger("alert-router")
     if getattr(logger, _ATTR_CONFIGURED, False):
         return logger
+
+    # 注入自定义 LogRecord 工厂，使每条日志带上调用处的类名（便于排查）
+    logging.setLogRecordFactory(_log_record_factory)
 
     # 创建日志目录
     log_path = Path(log_dir)
