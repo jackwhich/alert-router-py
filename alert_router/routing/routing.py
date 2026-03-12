@@ -108,12 +108,16 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
     if not routing_rules:
         logger.error("配置中未找到 routing 规则，告警将无法发送")
         return []
-    
+
+    logger.info("路由匹配: _source=%s _receiver=%s 规则数=%d", labels.get("_source"), labels.get("_receiver"), len(routing_rules))
+
     # 先收集所有匹配的规则和默认规则
-    for r in routing_rules:
-        if "match" in r and match(labels, r["match"]):
-            # 匹配的规则：添加到渠道集合
-            channels.update(r["send_to"])
+    for idx, r in enumerate(routing_rules):
+        if "match" in r:
+            matched = match(labels, r["match"])
+            logger.info("规则[%d] match_keys=%s match_result=%s cond_receiver=%s", idx, list(r["match"].keys()), matched, r["match"].get("_receiver"))
+            if matched:
+                channels.update(r["send_to"])
         elif r.get("default"):
             # 默认规则：仅保留第一个，避免多条 default 覆盖
             if default_channels is None:

@@ -29,7 +29,7 @@ logs/
 
 # PID 文件
 *.pid
-
+config.yaml-ebv
 # IDE
 .vscode/
 .idea/
