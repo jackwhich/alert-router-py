@@ -102,8 +102,20 @@ async def webhook(req: Request):
         status = payload.get("status")
         alerts_count = len(payload.get("alerts", [])) if payload.get("alerts") else 0
         logger.info("接收数据状态=%s, 告警数量=%s", status, alerts_count)
-        raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
-        logger.info("接收完整 Webhook 负载: %s", raw_preview)
+        # 默认仅记录摘要，避免单条日志过大；完整内容仅在 DEBUG 下输出且做长度截断
+        receiver = payload.get("receiver")
+        version = payload.get("version")
+        group_key = payload.get("groupKey")
+        logger.info(
+            "接收数据摘要: receiver=%s, version=%s, groupKey=%s, 告警数量=%s",
+            receiver,
+            version,
+            group_key,
+            alerts_count,
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            raw_preview = json.dumps(payload, ensure_ascii=False)
+            logger.debug("接收完整 Webhook 负载(截断): %s", raw_preview[:2000])
 
         result = _handle_webhook(payload)
         ok = result.get("ok", False)

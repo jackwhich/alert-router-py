@@ -11,6 +11,7 @@ Prometheus 趋势图生成模块
 from __future__ import annotations
 
 import platform
+import re
 import subprocess
 import warnings
 from datetime import datetime, timedelta, timezone
@@ -165,6 +166,27 @@ DEFAULT_LEGEND_LABEL_WHITELIST = (
     "namespace", "alertmanager", "remote_name", "controller", "resource",
     "service", "kubernetes_namespace",
 )
+
+
+def _normalize_query_for_plot(expr: str) -> str:
+    """
+    将告警表达式转换为更适合出图的查询表达式。
+
+    典型告警规则会写成 `metric_expr > 30` 或 `metric_expr >= 0.8`，
+    这种表达式在 query_range 下只会保留满足阈值的片段，图上看起来像一条窄竖线。
+    若右侧是纯标量阈值，则剥离比较条件，直接绘制原始 metric_expr。
+    """
+    if not expr:
+        return expr
+    normalized = expr.strip()
+    pattern = re.compile(
+        r"^(?P<base>.+?)\s*(?:>=|<=|==|!=|>|<)\s*(?:bool\s+)?(?P<scalar>-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*$"
+    )
+    match = pattern.match(normalized)
+    if not match:
+        return normalized
+    base_expr = (match.group("base") or "").strip()
+    return base_expr or normalized
 
 
 def _filter_result_by_alert_labels(
@@ -686,8 +708,12 @@ def generate_plot_from_generator_url(
         end = now_utc
         start = end - timedelta(minutes=lb)
         prometheus_api = f"{prometheus_base}/api/v1/query_range"
+        plot_expr = _normalize_query_for_plot(expr)
+        if plot_expr != expr:
+            logger.debug("检测到阈值比较表达式，已转换为绘图表达式: %s -> %s", expr, plot_expr)
+
         params = {
-            "query": expr,
+            "query": plot_expr,
             "start": start.isoformat(),
             "end": end.isoformat(),
             "step": step,
@@ -713,9 +739,9 @@ def generate_plot_from_generator_url(
         # DEBUG: 打印查询结果中的标签，辅助排查为什么 status 不显示
         if result:
             first_metric = result[0].get("metric", {})
-            logger.info(f"[图表调试] Prometheus 返回了 {len(result)} 条曲线")
-            logger.info(f"[图表调试] 第一条曲线的原始标签: {first_metric}")
-            logger.info(f"[图表调试] 使用的图例白名单: {legend_label_whitelist}")
+            logger.debug("[图表调试] Prometheus 返回了 %s 条曲线", len(result))
+            logger.debug("[图表调试] 第一条曲线的原始标签: %s", first_metric)
+            logger.debug("[图表调试] 使用的图例白名单: %s", legend_label_whitelist)
             
         if payload.get("status") != "success" or not isinstance(result, list) or not result:
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
@@ -723,14 +749,14 @@ def generate_plot_from_generator_url(
 
         # 按告警 labels 过滤，只画与当前告警目标一致的曲线（如图只显示 /dev/sdb1 /data 而非全部 tmpfs）
         if alert_labels:
-            logger.info(f"[图表调试] 正在按告警标签过滤: {alert_labels}")
+            logger.debug("[图表调试] 正在按告警标签过滤: %s", alert_labels)
         
         result = _filter_result_by_alert_labels(result, alert_labels)
         
         if result:
-            logger.info(f"[图表调试] 过滤后剩余 {len(result)} 条曲线")
+            logger.debug("[图表调试] 过滤后剩余 %s 条曲线", len(result))
             if result:
-                 logger.info(f"[图表调试] 过滤后第一条曲线标签: {result[0].get('metric', {})}")
+                 logger.debug("[图表调试] 过滤后第一条曲线标签: %s", result[0].get("metric", {}))
 
         if result and len(result) > max_series:
             result = result[:max_series]

@@ -232,7 +232,6 @@ class AlertService:
             body = render(channel.template, ctx)
             use_image = (
                 channel.type == "telegram"
-                and source == "prometheus"
                 and channel.image_enabled
                 and bool(image_bytes)
             )
