@@ -11,6 +11,7 @@ PROJECT_NAME="alert-router"
 PID_FILE="${SCRIPT_DIR}/${PROJECT_NAME}.pid"
 LOG_FILE="${SCRIPT_DIR}/logs/${PROJECT_NAME}.log"
 PYTHON_CMD="${PYTHON_CMD:-python3.9}"  # 默认使用 python3.9
+CONFIG_FILE="${CONFIG_FILE:-${SCRIPT_DIR}/config.yaml}"  # 支持外部指定配置文件路径
 
 # 工作进程数和超时时间（可以通过环境变量覆盖）
 WORKERS="${WORKERS:-4}"
@@ -78,8 +79,8 @@ check_dependencies() {
 
 # 检查配置文件
 check_config() {
-    if [ ! -f "${SCRIPT_DIR}/config.yaml" ]; then
-        log_error "未找到 config.yaml 配置文件"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_error "未找到配置文件: $CONFIG_FILE"
         exit 1
     fi
 }
@@ -114,7 +115,7 @@ start_service() {
     log_info "正在启动 ${PROJECT_NAME} 服务..."
     log_info "工作进程数: ${WORKERS}"
     log_info "日志文件: ${LOG_FILE}"
-    log_info "配置将从 config.yaml 读取"
+    log_info "配置文件: ${CONFIG_FILE}"
     
     # 创建日志目录
     mkdir -p "$(dirname "$LOG_FILE")"
@@ -122,7 +123,7 @@ start_service() {
     # 启动服务（后台运行）
     # 直接运行 app.py，它会自动从 config.yaml 读取配置
     cd "$SCRIPT_DIR"
-    WORKERS="$WORKERS" TIMEOUT="$TIMEOUT" nohup $PYTHON_CMD app.py \
+    WORKERS="$WORKERS" TIMEOUT="$TIMEOUT" CONFIG_FILE="$CONFIG_FILE" nohup $PYTHON_CMD app.py \
         >> "$LOG_FILE" 2>&1 &
     
     PID=$!
@@ -229,7 +230,7 @@ status_service() {
         fi
         
         # 显示端口监听情况（从配置读取端口）
-        CONFIG_PORT=$(python3 -c "import yaml; f=open('$SCRIPT_DIR/config.yaml'); c=yaml.safe_load(f); f.close(); print(c.get('server', {}).get('port', 8080))" 2>/dev/null || echo "8080")
+        CONFIG_PORT=$(python3 -c "import yaml; f=open('$CONFIG_FILE'); c=yaml.safe_load(f); f.close(); print(c.get('server', {}).get('port', 8080))" 2>/dev/null || echo "8080")
         if command -v netstat > /dev/null; then
             echo ""
             echo "端口监听情况:"
