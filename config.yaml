@@ -21,11 +21,14 @@ proxy:
 # Prometheus 告警图片渲染（兼容 VictoriaMetrics：填 VM 的查询地址即可）
 prometheus_image:
   enabled: true
-  # 数据源地址，请求 /api/v1/query_range 时使用。若用 VictoriaMetrics 替代 Prometheus：
-  # - 集群：http://<vmselect_ip>:8481/select/0/prometheus（示例: http://10.8.16.68:8481/select/0/prometheus）
+  # 数据源地址，请求时会拼上 /api/v1/query_range。若用 VictoriaMetrics 替代 Prometheus：
+  # - 集群 vmselect：必须带 path，例如 http://<vmselect>:8481/select/0/prometheus（否则会 400）
   # - 单机：http://<主机>:8428
   # 原 Prometheus：http://prometheus:9090。留空则从告警 generatorURL 解析。
-  # 告警来自 vmalert 时 generatorURL 无 g0.expr，程序会调 vmalert API 取表达式；此时必须配置本项为 VM 查询地址才能出图。
+  # 告警来自 vmalert 时，默认 generatorURL 无 g0.expr，无法出图。需在 vmalert 启动参数中配置：
+  #   -external.url=http://<vmalert 或 VM 地址>:8880
+  #   -external.alert.source=graph?g0.expr={{.Expr|queryEscape}}
+  # 详见 monitoring-stack/vmalert/config/vmalert.yml 或下方「vmalert 出图配置」说明。
   prometheus_url: "http://x.x.x.x:9090"
   # 图片生成是否使用代理（默认 false，因为 Prometheus 通常是内网地址）
   # 绘图引擎选择: "plotly" (推荐，更美观) 或 "matplotlib" (传统，兼容性好)

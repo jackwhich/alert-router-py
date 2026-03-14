@@ -684,17 +684,30 @@ def generate_plot_from_generator_url(
         q = parse_qs(urlparse(generator_url).query)
         expr = (q.get("g0.expr") or [None])[0]
         if not expr:
-            logger.info("generatorURL 不含 g0.expr，跳过出图")
+            # 便于排查：打出收到的 generatorURL 以及是否配置了 prometheus_url，说明为何没用 config 的 URI 去拉图
+            logger.info(
+                "generatorURL 不含 g0.expr，跳过出图；generatorURL=%s，已配置 prometheus_url=%s",
+                generator_url[:200] + ("..." if len(generator_url) > 200 else ""),
+                bool(prometheus_url),
+            )
+            if prometheus_url:
+                logger.info(
+                    "已配置 prometheus_url 但因无法从 generatorURL 获取查询表达式（vmalert 链接通常无 g0.expr），无法请求该地址出图。"
+                    "可配置 vmalert 的 -external.alert.source 将 expr 写入链接。"
+                )
             return None
 
         # 确定 Prometheus API 地址：优先使用配置的 prometheus_url，否则从 generatorURL 解析
         if prometheus_url:
-            # 使用配置的 Prometheus URL
+            # 使用配置的 Prometheus URL（config 中的 prometheus_image.prometheus_url）
+            # 保留 path：VictoriaMetrics vmselect 需用 /select/0/prometheus，否则会 400
             parsed_prometheus = urlparse(prometheus_url)
             if not parsed_prometheus.scheme or not parsed_prometheus.netloc:
                 logger.warning("配置的 prometheus_url 非法，跳过出图: %s", prometheus_url)
                 return None
-            prometheus_base = f"{parsed_prometheus.scheme}://{parsed_prometheus.netloc}"
+            base_path = (parsed_prometheus.path or "").rstrip("/") or ""
+            prometheus_base = f"{parsed_prometheus.scheme}://{parsed_prometheus.netloc}{base_path}"
+            logger.info("使用 config 中的 prometheus_url 请求趋势图: %s", prometheus_base)
         else:
             # 从 generatorURL 解析
             parsed = urlparse(generator_url)

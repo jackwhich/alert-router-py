@@ -420,6 +420,25 @@ jenkins_dedup:
   clear_on_resolved: true
 ```
 
+#### vmalert 告警出图：配置 `-external.alert.source`
+
+告警来自 **VictoriaMetrics vmalert** 时，默认的 generatorURL 为 `vmalert/alert?group_id=...&alert_id=...`，**不含查询表达式（g0.expr）**，本程序无法据此请求趋势图。
+
+**官方依据**：VictoriaMetrics 文档与 `vmalert -help` 均说明 `-external.alert.source` 用于覆盖发往 Alertmanager 的告警 Source 链接，支持 Go 模板；文档示例：`-external.alert.source='vmui/#/?g0.expr={{.Expr|queryEscape}}'`。见 [vmalert 文档 #external-alert-source](https://docs.victoriametrics.com/vmalert.html#external-alert-source)。
+
+在 vmalert 的**启动参数**中增加以下两项，告警链接会带上 `g0.expr`（放在 URL 的 query 中便于本程序解析），即可用 `config` 中的 `prometheus_url` 出图：
+
+```bash
+-external.url=http://<vmalert 或 VM 的访问地址>:8880
+-external.alert.source=graph?g0.expr={{.Expr|queryEscape}}
+```
+
+- **`-external.url`**：告警里 generatorURL 的前缀，填 vmalert 自身地址（或可被接收端访问的 VM 地址）即可。
+- **`-external.alert.source`**：官方支持的模板；`{{.Expr|queryEscape}}` 为当前规则的 PromQL/MetricsQL 表达式（已 URL 编码）。文档中 VMUI 示例把 g0.expr 放在 fragment（`#` 后）；此处用 `graph?g0.expr=...` 把表达式放在 query 里，本程序才能从 `urlparse(generatorURL).query` 解析出 `g0.expr`。
+
+**配置方式**：若 vmalert 由 systemd 管理，在 `/etc/systemd/system/vmalert.service.d/override.conf` 的 `ExecStart` 中追加上述两个参数，然后执行 `systemctl daemon-reload && systemctl restart vmalert`。  
+更多说明见：`monitoring-stack/vmalert/config/vmalert.yml`（若使用同仓库的 monitoring-stack）。
+
 ---
 
 ## 告警重复排查
