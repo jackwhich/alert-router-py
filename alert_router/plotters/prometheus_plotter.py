@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
 from typing import Dict, List, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import matplotlib
 import matplotlib.dates as mdates
@@ -720,6 +720,8 @@ def generate_plot_from_generator_url(
             "step": step,
         }
 
+        full_uri = f"{prometheus_api}?{urlencode(params)}"
+        logger.info("获取趋势图请求 URI: %s", full_uri)
         logger.debug(
             "请求 Prometheus query_range 生成趋势图: api=%s, step=%s, lookback=%sm",
             prometheus_api,
