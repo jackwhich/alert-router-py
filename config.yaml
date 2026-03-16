@@ -21,8 +21,8 @@ proxy:
 # Prometheus 告警图片渲染（兼容 VictoriaMetrics：填 VM 的查询地址即可）
 prometheus_image:
   enabled: true
-  # datasource: auto（按 URL 推断）| prometheus | victoriametrics（VM 会注入 label 收窄查询）
-  # inject_labels: 仅 prometheus 时生效，是否注入 label
+  # datasource: auto（按 generatorURL 自动识别 Prometheus / VictoriaMetrics）| prometheus | victoriametrics；auto 时 VM（含 vmalert/vmselect/victoriametrics/select）会注入 label 收窄查询
+  # inject_labels: 仅 datasource=prometheus 时生效，是否向表达式注入 label
   # prometheus_url: VM 集群带 path 如 .../select/0/prometheus，单机 :8428，Prometheus :9090。vmalert 出图需配 -external.alert.source，见 README。
   prometheus_url: "http://x.x.x.x:9090"
   # 图片生成是否使用代理（默认 false，因为 Prometheus 通常是内网地址）

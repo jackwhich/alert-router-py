@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
 from typing import Any, Dict, List, Optional
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 import matplotlib
 import matplotlib.dates as mdates
@@ -192,14 +192,40 @@ def _normalize_query_for_plot(expr: str) -> str:
     return normalized
 
 
+def _full_decode_expr(raw: str) -> str:
+    """对 expr 做完整 URL 解码（与 Go url.Query().Get 行为一致，支持多重编码）。"""
+    if not raw:
+        return raw
+    s = raw.strip()
+    while True:
+        decoded = unquote(s)
+        if decoded == s:
+            break
+        s = decoded
+    return s
+
+
+def _parse_expr_from_generator_url(generator_url: str) -> Optional[str]:
+    """从 generatorURL 取 g0.expr 并完整 decode。"""
+    if not generator_url:
+        return None
+    q = parse_qs(urlparse(generator_url).query)
+    raw = (q.get("g0.expr") or [None])[0]
+    if raw is None:
+        return None
+    expr = _full_decode_expr(raw if isinstance(raw, str) else str(raw))
+    return (expr.strip() or None) if expr else None
+
+
 def _is_datasource_victoriametrics(generator_url: str) -> bool:
-    """根据 generatorURL 判断是否来自 VictoriaMetrics（如 vmalert + vmselect）。"""
+    """根据 generatorURL 判断是否来自 VictoriaMetrics（vmalert / vmselect / 带 /select/ 的 VM 集群）。"""
     if not generator_url:
         return False
     url_lower = generator_url.lower()
     return (
         "victoriametrics" in url_lower
         or "vmselect" in url_lower
+        or "vmalert" in url_lower
         or "/select/" in generator_url
     )
 
@@ -762,10 +788,12 @@ def generate_plot_from_generator_url(
     inject_labels: Optional[bool] = None,  # 仅 Prometheus 时生效：是否向 expr 注入 label 收窄查询
 ) -> Optional[bytes]:
     """
-    根据 generatorURL 生成 Prometheus/VM 趋势图。
+    根据 generatorURL 生成 Prometheus/VM 趋势图（与 Go 取数方式一致）。
 
+    - 表达式来源：从 generatorURL 的 g0.expr 取，并做完整 URL 解码（支持多重编码）。
+    - 请求方式：POST + application/x-www-form-urlencoded 调用 query_range（与 Go 一致），避免 GET 对长 expr 的编码差异。
     - datasource_type 为 victoriametrics（或 auto 推断为 VM）且 alert_labels 全标量时，会向表达式注入
-      label 再请求，使 API 只返回当前告警的 series；合并告警（labels 含列表）时不注入，请求后按多值过滤。
+      label 再请求；合并告警（labels 含列表）时不注入，请求后按多值过滤。
     - datasource_type 为 prometheus 时默认不注入，可通过 inject_labels=True 启用。
     - alert_labels 支持列表值，过滤时保留 metric 在对应列表内的 series（一图多曲线）。
     """
@@ -773,13 +801,11 @@ def generate_plot_from_generator_url(
         return None
 
     try:
-        # 解析查询表达式
-        q = parse_qs(urlparse(generator_url).query)
-        expr = (q.get("g0.expr") or [None])[0]
+        # 解析查询表达式：从 g0.expr 取并完整 URL decode
+        expr = _parse_expr_from_generator_url(generator_url)
         if expr:
-            logger.info("从 generatorURL 解析出的 g0.expr（vmalert 传出）: %s", expr[:300] + ("..." if len(expr) > 300 else ""))
+            logger.info("从 generatorURL 解析出的 g0.expr（已完整 decode）: %s", expr[:300] + ("..." if len(expr) > 300 else ""))
         if not expr:
-            # 便于排查：打出收到的 generatorURL 以及是否配置了 prometheus_url，说明为何没用 config 的 URI 去拉图
             logger.info(
                 "generatorURL 不含 g0.expr，跳过出图；generatorURL=%s，已配置 prometheus_url=%s",
                 generator_url[:200] + ("..." if len(generator_url) > 200 else ""),
@@ -839,24 +865,25 @@ def generate_plot_from_generator_url(
         if should_inject:
             plot_expr = _inject_alert_labels_into_expr(plot_expr, alert_labels)
 
+        # 与 Go 一致：POST + application/x-www-form-urlencoded，避免 GET 对长 expr 的编码差异
         params = {
             "query": plot_expr,
             "start": start.isoformat(),
             "end": end.isoformat(),
             "step": step,
         }
-
-        full_uri = f"{prometheus_api}?{urlencode(params)}"
-        logger.info("获取趋势图请求 URI: %s", full_uri)
+        full_uri_decoded = f"{prometheus_api}?{urlencode(params)}"
+        logger.info("获取趋势图 query_range（POST，已完整 decode 的 URI 示意）: %s", full_uri_decoded[:500] + ("..." if len(full_uri_decoded) > 500 else ""))
         logger.debug(
             "请求 Prometheus query_range 生成趋势图: api=%s, step=%s, lookback=%sm",
             prometheus_api,
             step,
             lookback_minutes,
         )
-        response = requests.get(
+        response = requests.post(
             prometheus_api,
-            params=params,
+            data=params,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=timeout_seconds,
             proxies=proxies,
         )
