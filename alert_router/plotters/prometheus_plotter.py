@@ -17,7 +17,7 @@ import warnings
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import matplotlib
@@ -173,43 +173,135 @@ def _normalize_query_for_plot(expr: str) -> str:
     将告警表达式转换为更适合出图的查询表达式。
 
     典型告警规则会写成 `metric_expr > 30` 或 `metric_expr >= 0.8`，
-    这种表达式在 query_range 下只会保留满足阈值的片段，图上看起来像一条窄竖线。
-    若右侧是纯标量阈值，则剥离比较条件，直接绘制原始 metric_expr。
+    这种表达式在 query_range 下会返回 0/1 布尔值（满足阈值为 1），图上会显示 0-1 而非真实指标（如 727）。
+    因此剥离末尾的标量比较条件，直接绘制原始 metric_expr，Y 轴才显示真实计数值。
     """
     if not expr:
         return expr
     normalized = expr.strip()
-    pattern = re.compile(
-        r"^(?P<base>.+?)\s*(?:>=|<=|==|!=|>|<)\s*(?:bool\s+)?(?P<scalar>-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*$"
+    # 从字符串末尾匹配：可选的空白 + 比较符 + 可选的 bool + 数字 + 结尾空白
+    # 用后缀匹配避免 base 内含有 =、> 等字符（如 status=~"4.*.*"）时误匹配
+    suffix_pattern = re.compile(
+        r"\s*(?:>=|<=|==|!=|>|<)\s*(?:bool\s+)?(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*$"
     )
-    match = pattern.match(normalized)
-    if not match:
-        return normalized
-    base_expr = (match.group("base") or "").strip()
-    return base_expr or normalized
+    match = suffix_pattern.search(normalized)
+    if match:
+        base_expr = normalized[: match.start()].strip()
+        if base_expr:
+            return base_expr
+    return normalized
 
 
-def _filter_result_by_alert_labels(
-    result: List[dict],
-    alert_labels: Optional[Dict[str, str]],
-) -> List[dict]:
+def _is_datasource_victoriametrics(generator_url: str) -> bool:
+    """根据 generatorURL 判断是否来自 VictoriaMetrics（如 vmalert + vmselect）。"""
+    if not generator_url:
+        return False
+    url_lower = generator_url.lower()
+    return (
+        "victoriametrics" in url_lower
+        or "vmselect" in url_lower
+        or "/select/" in generator_url
+    )
+
+
+def _alert_labels_all_scalar(alert_labels: Optional[Dict[str, Any]]) -> bool:
+    """用于注入/收窄的 label 是否全为标量（无列表），合并告警时为 False。"""
+    if not alert_labels:
+        return True
+    for k, v in alert_labels.items():
+        if k in _ALERT_ONLY_LABELS or v is None or v == "":
+            continue
+        if isinstance(v, list):
+            return False
+    return True
+
+
+def _inject_alert_labels_into_expr(
+    expr: str,
+    alert_labels: Optional[Dict[str, Any]],
+) -> str:
     """
-    按告警 labels 过滤 query_range 返回的曲线，只保留与当前告警目标一致的 series。
-    例如告警是 device=/dev/sdb1, mountpoint=/data，则图里只画该磁盘的曲线，而不是所有 tmpfs 等。
+    把告警的 label 条件注入到查询表达式里，让 VM/Prometheus API 只返回「当前告警」对应的 series，
+    而不是该查询下的全部 series（避免「把当前时间所有的都罗列出来」）。
+    只注入 selector 里尚未存在的 label；仅标量值会注入（合并告警的列表值不注入）。
     """
-    if not alert_labels or not result:
-        return result
-    # 只拿会出现在 metric 里的标签做匹配（值为字符串；合并告警时可能为列表则跳过）
+    if not expr or not alert_labels:
+        return expr
     match_labels = {
         k: v for k, v in alert_labels.items()
         if k not in _ALERT_ONLY_LABELS and v and isinstance(v, str)
     }
     if not match_labels:
+        return expr
+    # 找第一个 selector { ... } 的起止位置（按括号匹配，忽略字符串内的花括号较复杂，先按简单匹配）
+    start = expr.find("{")
+    if start == -1:
+        return expr
+    depth = 1
+    i = start + 1
+    while i < len(expr) and depth > 0:
+        if expr[i] == "{":
+            depth += 1
+        elif expr[i] == "}":
+            depth -= 1
+        i += 1
+    if depth != 0:
+        return expr
+    end = i - 1
+    selector_inner = expr[start + 1 : end]
+    # 解析已有 label 名（key=value 或 key=~"regex"）
+    existing_keys = set(re.findall(r"(\w+)\s*[=~]", selector_inner))
+    to_add = {k: v for k, v in match_labels.items() if k not in existing_keys}
+    if not to_add:
+        return expr
+    # Prometheus 里 label 值需转义 \ 和 "
+    def escape_val(v: str) -> str:
+        return v.replace("\\", "\\\\").replace('"', '\\"')
+    extra = "," + ",".join(f'{k}="{escape_val(v)}"' for k, v in sorted(to_add.items()))
+    new_expr = expr[:end] + extra + expr[end:]
+    logger.info(
+        "已按告警 label 收窄查询，VM 只返回当前告警的 series：注入 %s",
+        list(to_add.keys()),
+    )
+    return new_expr
+
+
+def _filter_result_by_alert_labels(
+    result: List[dict],
+    alert_labels: Optional[Dict[str, Any]],
+) -> List[dict]:
+    """
+    按告警 labels 过滤 query_range 返回的曲线，只保留与当前告警目标一致的 series。
+    - 单条告警：label 值为标量，保留 metric 完全匹配的 series。
+    - 合并告警：label 值可为列表（如 server_name: ["a","b"], status: ["403","404"]），
+      保留 metric 的每个 key 在对应列表或等于标量的 series（一张图多条曲线，每条对应一实体）。
+    """
+    if not alert_labels or not result:
         return result
+    # 只拿会出现在 metric 里的标签做匹配；排除仅用于路由的标签
+    match_labels: Dict[str, Any] = {
+        k: v for k, v in alert_labels.items()
+        if k not in _ALERT_ONLY_LABELS and v is not None and v != ""
+    }
+    if not match_labels:
+        return result
+
+    def _series_matches(metric: dict) -> bool:
+        for k, v in match_labels.items():
+            mv = metric.get(k)
+            if isinstance(v, list):
+                if not v:
+                    continue  # 空列表不参与匹配
+                if mv not in v:
+                    return False
+            else:
+                if mv != v:
+                    return False
+        return True
+
     filtered = [
         s for s in result
-        if isinstance(s.get("metric"), dict)
-        and all(s["metric"].get(k) == v for k, v in match_labels.items())
+        if isinstance(s.get("metric"), dict) and _series_matches(s["metric"])
     ]
     if filtered:
         logger.debug(
@@ -664,17 +756,18 @@ def generate_plot_from_generator_url(
     alertname: Optional[str] = None,
     alert_time: Optional[str] = None,
     use_plotly: bool = True,  # 默认使用 Plotly
-    alert_labels: Optional[Dict[str, str]] = None,  # 告警 labels，用于只画与当前告警匹配的曲线
+    alert_labels: Optional[Dict[str, Any]] = None,  # 告警 labels，支持标量或列表（合并告警）
     legend_label_whitelist: Optional[List[str]] = None,  # 图例中只显示这些 label，不配置则用默认白名单
+    datasource_type: Optional[str] = None,  # "prometheus" | "victoriametrics" | None/"auto" 按 URL 推断
+    inject_labels: Optional[bool] = None,  # 仅 Prometheus 时生效：是否向 expr 注入 label 收窄查询
 ) -> Optional[bytes]:
     """
-    根据 generatorURL 生成 Prometheus 趋势图。
+    根据 generatorURL 生成 Prometheus/VM 趋势图。
 
-    若提供 alert_labels，会先按 instance/device/mountpoint 等过滤曲线，使图与告警文案一致。
-    legend_label_whitelist 控制图例中显示哪些标签（白名单），便于统一控制。
-
-    返回:
-        PNG 二进制内容；无法生成时返回 None。
+    - datasource_type 为 victoriametrics（或 auto 推断为 VM）且 alert_labels 全标量时，会向表达式注入
+      label 再请求，使 API 只返回当前告警的 series；合并告警（labels 含列表）时不注入，请求后按多值过滤。
+    - datasource_type 为 prometheus 时默认不注入，可通过 inject_labels=True 启用。
+    - alert_labels 支持列表值，过滤时保留 metric 在对应列表内的 series（一图多曲线）。
     """
     if not generator_url:
         return None
@@ -683,6 +776,8 @@ def generate_plot_from_generator_url(
         # 解析查询表达式
         q = parse_qs(urlparse(generator_url).query)
         expr = (q.get("g0.expr") or [None])[0]
+        if expr:
+            logger.info("从 generatorURL 解析出的 g0.expr（vmalert 传出）: %s", expr[:300] + ("..." if len(expr) > 300 else ""))
         if not expr:
             # 便于排查：打出收到的 generatorURL 以及是否配置了 prometheus_url，说明为何没用 config 的 URI 去拉图
             logger.info(
@@ -724,7 +819,25 @@ def generate_plot_from_generator_url(
         prometheus_api = f"{prometheus_base}/api/v1/query_range"
         plot_expr = _normalize_query_for_plot(expr)
         if plot_expr != expr:
-            logger.debug("检测到阈值比较表达式，已转换为绘图表达式: %s -> %s", expr, plot_expr)
+            logger.info("检测到阈值比较表达式，已转换为绘图表达式: %s -> %s", expr[:200], plot_expr[:200])
+
+        # 解析数据源：None/"auto" 时根据 generatorURL 推断
+        effective_ds = (datasource_type or "auto").strip().lower()
+        if effective_ds == "auto":
+            effective_ds = "victoriametrics" if _is_datasource_victoriametrics(generator_url) else "prometheus"
+            logger.debug("datasource 自动推断为: %s", effective_ds)
+        # VM：仅当 alert_labels 全为标量时注入；合并告警（含列表）不注入，靠请求后多值过滤
+        # Prometheus：仅当 inject_labels 为 True 且全标量时注入
+        should_inject = (
+            alert_labels
+            and _alert_labels_all_scalar(alert_labels)
+            and (
+                (effective_ds == "victoriametrics")
+                or (effective_ds == "prometheus" and inject_labels is True)
+            )
+        )
+        if should_inject:
+            plot_expr = _inject_alert_labels_into_expr(plot_expr, alert_labels)
 
         params = {
             "query": plot_expr,
@@ -762,6 +875,26 @@ def generate_plot_from_generator_url(
         if payload.get("status") != "success" or not isinstance(result, list) or not result:
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
             return None
+
+        # 校验：若图里最大值很小（如 0–5），而告警应为计数类（如当前值：727），说明表达式可能未剥离比较符，query_range 返回的是 0/1
+        try:
+            max_val = None
+            for s in result:
+                for item in (s.get("values") or []):
+                    if isinstance(item, (list, tuple)) and len(item) >= 2:
+                        try:
+                            v = float(item[1])
+                            max_val = v if max_val is None else max(max_val, v)
+                        except (TypeError, ValueError):
+                            pass
+            if max_val is not None and max_val < 20:
+                logger.warning(
+                    "图表数值偏小（最大值 %.1f）：若告警为计数类（如「当前值：727」）而图只显示 0–4，"
+                    "说明请求的表达式可能仍含比较符(>=200 等)，导致返回 0/1 而非真实计数。请核对上文的「转换为绘图表达式」与请求 query。",
+                    max_val,
+                )
+        except Exception:
+            pass
 
         # 按告警 labels 过滤，只画与当前告警目标一致的曲线（如图只显示 /dev/sdb1 /data 而非全部 tmpfs）
         if alert_labels:

@@ -124,6 +124,11 @@ class ImageService:
         legend_whitelist = image_cfg.get("legend_label_whitelist")
         if legend_whitelist is not None and not isinstance(legend_whitelist, list):
             legend_whitelist = None
+        # 数据源：auto（按 generatorURL 推断）/ prometheus / victoriametrics；仅 Prometheus 时 inject_labels 生效
+        datasource_type = image_cfg.get("datasource")
+        if datasource_type is not None and not isinstance(datasource_type, str):
+            datasource_type = None
+        inject_labels = image_cfg.get("inject_labels")
         image_bytes = generate_plot_from_generator_url(
             alert.get("generatorURL", ""),
             prometheus_url=prometheus_url,
@@ -137,6 +142,8 @@ class ImageService:
             use_plotly=use_plotly,
             alert_labels=alert.get("labels") or {},
             legend_label_whitelist=legend_whitelist,
+            datasource_type=datasource_type,
+            inject_labels=inject_labels if isinstance(inject_labels, bool) else None,
         )
         
         if image_bytes:

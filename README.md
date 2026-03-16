@@ -405,6 +405,11 @@ routing:
 prometheus_image:
   enabled: true
   prometheus_url: "http://prometheus:9090"
+  # 数据源类型：auto（按 generatorURL 推断）/ prometheus / victoriametrics
+  # VM 路径会向查询表达式注入告警 label，使 API 只返回当前告警的 series；合并告警时一图多曲线，按 label 多值过滤
+  datasource: "auto"
+  # 仅当 datasource 为 prometheus 时生效：是否向表达式注入 label 收窄查询（默认不注入）
+  # inject_labels: false
   plot_engine: "plotly"
   lookback_minutes: 15
   timeout_seconds: 8
