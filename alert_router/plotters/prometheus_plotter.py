@@ -237,6 +237,11 @@ def _shell_escape_for_double_quoted(s: str) -> str:
     return "".join(out)
 
 
+def _shell_escape_for_single_quoted(s: str) -> str:
+    """单引号 shell 片段内只需转义单引号：' -> '\\''（结束引号+反斜杠引号+开始引号）。双引号无需转义，从源头避免 \\\"。"""
+    return s.replace("'", "'\\''")
+
+
 def _is_datasource_victoriametrics(generator_url: str) -> bool:
     """根据 generatorURL 判断是否来自 VictoriaMetrics（vmalert / vmselect / 带 /select/ 的 VM 集群）。"""
     if not generator_url:
@@ -895,15 +900,15 @@ def generate_plot_from_generator_url(
 
         full_uri = f"{prometheus_api}?{urlencode(params)}"
         logger.info("获取趋势图请求 URI: %s", full_uri)
-        # 输出可直接复制到终端运行的 curl（仅做一层 shell 转义；若 plot_expr 已含 \" 则不再重复转义，避免 \\\"）
-        _q_escaped = _shell_escape_for_double_quoted(plot_expr)
+        # 使用单引号包裹 query，表达式内双引号（如 "50.*"）无需转义，从源头避免日志中出现 \"
+        _q_escaped = _shell_escape_for_single_quoted(plot_expr)
         _curl_cmd = (
-            f'curl -S -G '
-            f'--data-urlencode "query={_q_escaped}" '
-            f'--data-urlencode "start={start.isoformat()}" '
-            f'--data-urlencode "end={end.isoformat()}" '
-            f'--data-urlencode "step={step}" '
-            f'"{prometheus_api}"'
+            "curl -S -G "
+            f"--data-urlencode 'query={_q_escaped}' "
+            f"--data-urlencode 'start={start.isoformat()}' "
+            f"--data-urlencode 'end={end.isoformat()}' "
+            f"--data-urlencode 'step={step}' "
+            f"'{prometheus_api}'"
         )
         logger.info("curl 本地验证: %s", _curl_cmd)
         logger.debug(
