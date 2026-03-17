@@ -872,8 +872,20 @@ def generate_plot_from_generator_url(
             "end": end.isoformat(),
             "step": step,
         }
-        full_uri_decoded = f"{prometheus_api}?{urlencode(params)}"
-        logger.info("获取趋势图 query_range（POST，已完整 decode 的 URI 示意）: %s", full_uri_decoded[:500] + ("..." if len(full_uri_decoded) > 500 else ""))
+
+        full_uri = f"{prometheus_api}?{urlencode(params)}"
+        logger.info("获取趋势图请求 URI: %s", full_uri)
+        # 输出可直接复制到终端运行的 curl（仅对 value 内双引号做 shell 转义，用 %s 避免 repr 导致不能直接用）
+        _q_escaped = plot_expr.replace("\\", "\\\\").replace('"', '\\"')
+        _curl_cmd = (
+            f'curl -S -G '
+            f'--data-urlencode "query={_q_escaped}" '
+            f'--data-urlencode "start={start.isoformat()}" '
+            f'--data-urlencode "end={end.isoformat()}" '
+            f'--data-urlencode "step={step}" '
+            f'"{prometheus_api}"'
+        )
+        logger.info("curl 本地验证: %s", _curl_cmd)
         logger.debug(
             "请求 Prometheus query_range 生成趋势图: api=%s, step=%s, lookback=%sm",
             prometheus_api,
@@ -898,7 +910,41 @@ def generate_plot_from_generator_url(
             logger.debug("[图表调试] Prometheus 返回了 %s 条曲线", len(result))
             logger.debug("[图表调试] 第一条曲线的原始标签: %s", first_metric)
             logger.debug("[图表调试] 使用的图例白名单: %s", legend_label_whitelist)
-            
+
+        # Decode 调试：打印每条 series 的原始值与解析后的值（首、尾各一档），便于核对与告警是否一致
+        if result:
+            for idx, series in enumerate(result):
+                metric = series.get("metric") or {}
+                values = series.get("values") or []
+                if not values:
+                    logger.info("[decode] series[%s] metric=%s values=[]", idx, metric)
+                    continue
+                for label, (item, point_name) in [
+                    ("first", (values[0], "首点")),
+                    ("last", (values[-1], "尾点")),
+                ]:
+                    if not isinstance(item, (list, tuple)) or len(item) < 2:
+                        logger.info(
+                            "[decode] series[%s] metric=%s %s: 无效 item (非 list 或 len<2) raw=%s",
+                            idx, metric, point_name, item,
+                        )
+                        continue
+                    raw_ts, raw_val = item[0], item[1]
+                    type_val = type(raw_val).__name__
+                    try:
+                        decoded_ts = float(raw_ts)
+                        decoded_val = float(raw_val)
+                    except (TypeError, ValueError) as e:
+                        logger.info(
+                            "[decode] series[%s] metric=%s %s: 解析异常 %s raw_ts=%s raw_val=%s type_val=%s",
+                            idx, metric, point_name, e, raw_ts, raw_val, type_val,
+                        )
+                        continue
+                    logger.info(
+                        "[decode] series[%s] metric=%s %s: raw_ts=%s raw_val=%s (type=%s) -> decoded_ts=%.0f decoded_val=%s",
+                        idx, metric, point_name, raw_ts, raw_val, type_val, decoded_ts, decoded_val,
+                    )
+
         if payload.get("status") != "success" or not isinstance(result, list) or not result:
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
             return None
