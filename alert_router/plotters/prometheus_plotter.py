@@ -168,30 +168,6 @@ DEFAULT_LEGEND_LABEL_WHITELIST = (
 )
 
 
-def _normalize_query_for_plot(expr: str) -> str:
-    """
-    将告警表达式转换为更适合出图的查询表达式。
-
-    典型告警规则会写成 `metric_expr > 30` 或 `metric_expr >= 0.8`，
-    这种表达式在 query_range 下会返回 0/1 布尔值（满足阈值为 1），图上会显示 0-1 而非真实指标（如 727）。
-    因此剥离末尾的标量比较条件，直接绘制原始 metric_expr，Y 轴才显示真实计数值。
-    """
-    if not expr:
-        return expr
-    normalized = expr.strip()
-    # 从字符串末尾匹配：可选的空白 + 比较符 + 可选的 bool + 数字 + 结尾空白
-    # 用后缀匹配避免 base 内含有 =、> 等字符（如 status=~"4.*.*"）时误匹配
-    suffix_pattern = re.compile(
-        r"\s*(?:>=|<=|==|!=|>|<)\s*(?:bool\s+)?(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*$"
-    )
-    match = suffix_pattern.search(normalized)
-    if match:
-        base_expr = normalized[: match.start()].strip()
-        if base_expr:
-            return base_expr
-    return normalized
-
-
 def _full_decode_expr(raw: str) -> str:
     """对 expr 做完整 URL 解码（与 Go url.Query().Get 行为一致，支持多重编码）。"""
     if not raw:
@@ -868,9 +844,9 @@ def generate_plot_from_generator_url(
         end = now_utc
         start = end - timedelta(minutes=lb)
         prometheus_api = f"{prometheus_base}/api/v1/query_range"
-        plot_expr = _normalize_query_for_plot(expr)
-        if plot_expr != expr:
-            logger.info("检测到阈值比较表达式，已转换为绘图表达式: %s -> %s", expr[:200], plot_expr[:200])
+        # Decode 出的表达式 1:1 作为绘图 query，不做任何改写（不剥离 >=、>、< 等比较符）
+        plot_expr = expr
+        logger.info("绘图请求使用的表达式（与告警表达式一致）: %s", plot_expr)
 
         # 解析数据源：None/"auto" 时根据 generatorURL 推断
         effective_ds = (datasource_type or "auto").strip().lower()
@@ -989,7 +965,8 @@ def generate_plot_from_generator_url(
             if max_val is not None and max_val < 20:
                 logger.warning(
                     "图表数值偏小（最大值 %.1f）：若告警为计数类（如「当前值：727」）而图只显示 0–4，"
-                    "说明请求的表达式可能仍含比较符(>=200 等)，导致返回 0/1 而非真实计数。请核对上文的「转换为绘图表达式」与请求 query。",
+                    "请优先核对告警规则是否使用了比较表达式 + bool（该写法会返回 0/1），"
+                    "并确认上文记录的 query 与告警表达式一致。",
                     max_val,
                 )
         except Exception:
