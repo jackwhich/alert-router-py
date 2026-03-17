@@ -900,8 +900,9 @@ def generate_plot_from_generator_url(
 
         full_uri = f"{prometheus_api}?{urlencode(params)}"
         logger.info("获取趋势图请求 URI: %s", full_uri)
-        # 使用单引号包裹 query，表达式内双引号（如 "50.*"）无需转义，从源头避免日志中出现 \"
-        _q_escaped = _shell_escape_for_single_quoted(plot_expr)
+        # 拼 curl 时用「展示用」表达式：若 plot_expr 里已有 \"（来自 generatorURL 等），先还原为 "，否则复制到终端会多出反斜杠
+        _q_for_curl = plot_expr.replace('\\"', '"')
+        _q_escaped = _shell_escape_for_single_quoted(_q_for_curl)
         _curl_cmd = (
             "curl -S -G "
             f"--data-urlencode 'query={_q_escaped}' "
