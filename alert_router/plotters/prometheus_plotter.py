@@ -217,6 +217,26 @@ def _parse_expr_from_generator_url(generator_url: str) -> Optional[str]:
     return (expr.strip() or None) if expr else None
 
 
+def _shell_escape_for_double_quoted(s: str) -> str:
+    """对双引号内的 shell 字符串做一层转义；已存在的 \\\" 不再重复转义，避免日志里出现 \\\\\\\"。"""
+    out: List[str] = []
+    i = 0
+    while i < len(s):
+        if i + 1 < len(s) and s[i] == "\\" and s[i + 1] == '"':
+            out.append('\\"')
+            i += 2
+        elif s[i] == "\\":
+            out.append("\\\\")
+            i += 1
+        elif s[i] == '"':
+            out.append('\\"')
+            i += 1
+        else:
+            out.append(s[i])
+            i += 1
+    return "".join(out)
+
+
 def _is_datasource_victoriametrics(generator_url: str) -> bool:
     """根据 generatorURL 判断是否来自 VictoriaMetrics（vmalert / vmselect / 带 /select/ 的 VM 集群）。"""
     if not generator_url:
@@ -875,8 +895,8 @@ def generate_plot_from_generator_url(
 
         full_uri = f"{prometheus_api}?{urlencode(params)}"
         logger.info("获取趋势图请求 URI: %s", full_uri)
-        # 输出可直接复制到终端运行的 curl（仅对 value 内双引号做 shell 转义，用 %s 避免 repr 导致不能直接用）
-        _q_escaped = plot_expr.replace("\\", "\\\\").replace('"', '\\"')
+        # 输出可直接复制到终端运行的 curl（仅做一层 shell 转义；若 plot_expr 已含 \" 则不再重复转义，避免 \\\"）
+        _q_escaped = _shell_escape_for_double_quoted(plot_expr)
         _curl_cmd = (
             f'curl -S -G '
             f'--data-urlencode "query={_q_escaped}" '
