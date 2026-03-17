@@ -805,11 +805,11 @@ def generate_plot_from_generator_url(
         # 解析查询表达式：从 g0.expr 取并完整 URL decode
         expr = _parse_expr_from_generator_url(generator_url)
         if expr:
-            logger.info("从 generatorURL 解析出的 g0.expr（已完整 decode）: %s", expr[:300] + ("..." if len(expr) > 300 else ""))
+            logger.debug("从 generatorURL 解析出的 g0.expr（已完整 decode）: %s", expr)
         if not expr:
             logger.info(
                 "generatorURL 不含 g0.expr，跳过出图；generatorURL=%s，已配置 prometheus_url=%s",
-                generator_url[:200] + ("..." if len(generator_url) > 200 else ""),
+                generator_url,
                 bool(prometheus_url),
             )
             if prometheus_url:
@@ -829,7 +829,7 @@ def generate_plot_from_generator_url(
                 return None
             base_path = (parsed_prometheus.path or "").rstrip("/") or ""
             prometheus_base = f"{parsed_prometheus.scheme}://{parsed_prometheus.netloc}{base_path}"
-            logger.info("使用 config 中的 prometheus_url 请求趋势图: %s", prometheus_base)
+            logger.debug("使用 config 中的 prometheus_url 请求趋势图: %s", prometheus_base)
         else:
             # 从 generatorURL 解析
             parsed = urlparse(generator_url)
@@ -846,7 +846,7 @@ def generate_plot_from_generator_url(
         prometheus_api = f"{prometheus_base}/api/v1/query_range"
         # Decode 出的表达式 1:1 作为绘图 query，不做任何改写（不剥离 >=、>、< 等比较符）
         plot_expr = expr
-        logger.info("绘图请求使用的表达式（与告警表达式一致）: %s", plot_expr)
+        logger.debug("绘图请求使用的表达式（与告警表达式一致）: %s", plot_expr)
 
         # 解析数据源：None/"auto" 时根据 generatorURL 推断
         effective_ds = (datasource_type or "auto").strip().lower()
@@ -875,7 +875,7 @@ def generate_plot_from_generator_url(
         }
 
         full_uri = f"{prometheus_api}?{urlencode(params)}"
-        logger.info("获取趋势图请求 URI: %s", full_uri)
+        logger.debug("获取趋势图请求 URI: %s", full_uri)
         # 拼 curl 时用「展示用」表达式：若 plot_expr 里已有 \"（来自 generatorURL 等），先还原为 "，否则复制到终端会多出反斜杠
         _q_for_curl = plot_expr.replace('\\"', '"')
         _q_escaped = _shell_escape_for_single_quoted(_q_for_curl)
@@ -887,7 +887,7 @@ def generate_plot_from_generator_url(
             f"--data-urlencode 'step={step}' "
             f"'{prometheus_api}'"
         )
-        logger.info("curl 本地验证: %s", _curl_cmd)
+        logger.debug("curl 本地验证: %s", _curl_cmd)
         logger.debug(
             "请求 Prometheus query_range 生成趋势图: api=%s, step=%s, lookback=%sm",
             prometheus_api,
@@ -919,14 +919,14 @@ def generate_plot_from_generator_url(
                 metric = series.get("metric") or {}
                 values = series.get("values") or []
                 if not values:
-                    logger.info("[decode] series[%s] metric=%s values=[]", idx, metric)
+                    logger.debug("[decode] series[%s] metric=%s values=[]", idx, metric)
                     continue
                 for label, (item, point_name) in [
                     ("first", (values[0], "首点")),
                     ("last", (values[-1], "尾点")),
                 ]:
                     if not isinstance(item, (list, tuple)) or len(item) < 2:
-                        logger.info(
+                        logger.debug(
                             "[decode] series[%s] metric=%s %s: 无效 item (非 list 或 len<2) raw=%s",
                             idx, metric, point_name, item,
                         )
@@ -937,12 +937,12 @@ def generate_plot_from_generator_url(
                         decoded_ts = float(raw_ts)
                         decoded_val = float(raw_val)
                     except (TypeError, ValueError) as e:
-                        logger.info(
+                        logger.debug(
                             "[decode] series[%s] metric=%s %s: 解析异常 %s raw_ts=%s raw_val=%s type_val=%s",
                             idx, metric, point_name, e, raw_ts, raw_val, type_val,
                         )
                         continue
-                    logger.info(
+                    logger.debug(
                         "[decode] series[%s] metric=%s %s: raw_ts=%s raw_val=%s (type=%s) -> decoded_ts=%.0f decoded_val=%s",
                         idx, metric, point_name, raw_ts, raw_val, type_val, decoded_ts, decoded_val,
                     )
@@ -980,8 +980,7 @@ def generate_plot_from_generator_url(
         
         if result:
             logger.debug("[图表调试] 过滤后剩余 %s 条曲线", len(result))
-            if result:
-                 logger.debug("[图表调试] 过滤后第一条曲线标签: %s", result[0].get("metric", {}))
+            logger.debug("[图表调试] 过滤后第一条曲线标签: %s", result[0].get("metric", {}))
 
         if result and len(result) > max_series:
             result = result[:max_series]
