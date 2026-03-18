@@ -114,15 +114,23 @@ async def webhook(req: Request):
             alerts_count,
         )
         if logger.isEnabledFor(logging.DEBUG):
-            raw_preview = json.dumps(payload, ensure_ascii=False)
-            logger.debug("接收完整 Webhook 负载(截断): %s", raw_preview[:2000])
+            raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
+            if len(raw_preview) > 12000:
+                raw_preview = raw_preview[:12000] + "\n... (截断)"
+            logger.debug("接收完整 Webhook 负载:\n%s", raw_preview)
 
         result = _handle_webhook(payload)
         ok = result.get("ok", False)
         sent = result.get("sent", [])
         logger.info("Webhook 处理完成, 成功=%s, 发送结果数=%s", ok, len(sent))
         if not ok:
-            logger.warning("Webhook 处理结果异常: %s", result)
+            try:
+                logger.warning(
+                    "Webhook 处理结果异常:\n%s",
+                    json.dumps(result, ensure_ascii=False, indent=2),
+                )
+            except (TypeError, ValueError):
+                logger.warning("Webhook 处理结果异常: %s", result)
         return result
     except json.JSONDecodeError as e:
         logger.warning("JSON 解析失败: %s", e)

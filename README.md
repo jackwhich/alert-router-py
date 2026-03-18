@@ -525,9 +525,10 @@ logging:
   level: "INFO"
   max_bytes: 10485760
   backup_count: 5
+  log_format: "human"   # human=多行可读；json=单行 JSON（便于采集）
 ```
 
-日志为 JSON 单行，必含 `time`, `level`, `traceId`, `message`；key 英文，message 中文。
+默认 `log_format: human`：文件与控制台均为多行可读格式，长 payload 不再被包进 JSON 导致 `\"`、`\n` 难以辨认。若需 Loki 等按行解析 JSON，可设为 `json`。
 
 ---
 

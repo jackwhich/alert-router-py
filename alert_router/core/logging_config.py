@@ -124,18 +124,20 @@ def setup_logging(
     log_file: str,
     level: str,
     max_bytes: int,
-    backup_count: int
+    backup_count: int,
+    log_format: str = "human",
 ) -> logging.Logger:
     """
     配置日志系统。由 app 在启动时调用一次；若 logger 已配置过则直接返回，不重复添加 handler。
-    
+
     Args:
         log_dir: 日志目录
         log_file: 日志文件名
         level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         max_bytes: 单个日志文件最大大小（字节）
         backup_count: 保留的备份文件数量
-    
+        log_format: human=多行可读（无 JSON 二次转义）；json=单行 JSON（便于 Loki 等采集）
+
     Returns:
         logging.Logger: 配置好的 logger 实例
     """
@@ -161,10 +163,10 @@ def setup_logging(
     # 始终清空已有 handler（防止其它地方或旧逻辑曾添加过），再只加一个 file、一个 console
     logger.handlers.clear()
     
-    # JSON 单行日志格式
-    formatter = JsonFormatter()
+    fmt = (log_format or "human").strip().lower()
+    formatter = JsonFormatter() if fmt == "json" else ConsoleFormatter()
     trace_filter = TraceIdFilter()
-    
+
     # 文件 handler（带轮转），仅一个
     file_handler = RotatingFileHandler(
         log_file_path,
@@ -176,12 +178,12 @@ def setup_logging(
     file_handler.setFormatter(formatter)
     file_handler.addFilter(trace_filter)
     logger.addHandler(file_handler)
-    
-    # 控制台 handler：人类可读格式，不转义换行，便于直接看 payload；仅 TTY 时添加
+
+    # 控制台：与文件使用同一 formatter，保证 tail/journal 与文件观感一致
     if sys.stderr.isatty():
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(log_level)
-        console_handler.setFormatter(ConsoleFormatter())
+        console_handler.setFormatter(formatter)
         console_handler.addFilter(trace_filter)
         logger.addHandler(console_handler)
     

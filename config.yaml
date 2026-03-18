@@ -8,6 +8,8 @@ logging:
   level: "INFO"
   max_bytes: 10485760
   backup_count: 5
+  # human=多行可读（默认）；json=单行 JSON 便于日志平台采集
+  log_format: "human"
 
 # 全局代理开关（控制是否使用代理）
 # true: 启用代理（默认）
