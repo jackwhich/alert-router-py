@@ -4,14 +4,7 @@ Prometheus 指标定义模块
 对齐 alert-router-go/internal/metrics/metrics.go 中的指标，统一前缀 webhook_alerts_，
 并在此基础上扩展更细粒度的观测指标（HTTP 与业务维度）。
 """
-from prometheus_client import (
-    Counter,
-    Histogram,
-    GCCollector,
-    ProcessCollector,
-    PlatformCollector,
-    REGISTRY,
-)
+from prometheus_client import Counter, Histogram
 
 
 _PREFIX = "webhook_alerts_"
@@ -225,11 +218,4 @@ def inc_alerts_sent_by_severity(
         severity=severity or "unknown",
         result=result or "unknown",
     ).inc()
-
-
-# 显式注册进程/解释器相关 Collector，补充 process_* / python_* / gc_* 指标
-ProcessCollector(registry=REGISTRY)
-PlatformCollector(registry=REGISTRY)
-GCCollector(registry=REGISTRY)
-
 
