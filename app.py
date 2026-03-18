@@ -13,10 +13,16 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from alert_router.core.config import load_config
 from alert_router.core.logging_config import new_trace_id, set_trace_id, setup_logging
+from alert_router.core.metrics import (
+    WebhookRequestDuration,
+    WebhookRequestsTotal,
+    inc_webhook_error,
+)
 
 # 加载配置（config 只读配置，不初始化日志）
 CONFIG, CHANNELS = load_config()
@@ -78,6 +84,12 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(lifespan=lifespan, redirect_slashes=False)
 
 
+@app.get("/metrics")
+async def metrics():
+    """Prometheus 指标采集端点（对齐 Go 版本 /metrics）。"""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 def _handle_webhook(payload: dict) -> dict:
     """
     处理 webhook 请求（委托给服务层）
@@ -97,6 +109,8 @@ async def webhook(req: Request):
     trace_id = req.headers.get("X-Trace-Id") or req.headers.get("X-Request-Id") or new_trace_id()
     set_trace_id(trace_id)
     logger.info("收到告警 Webhook 请求")
+    timer = WebhookRequestDuration.time()
+    status_label = "ok"
     try:
         payload = await req.json()
         status = payload.get("status")
@@ -124,17 +138,41 @@ async def webhook(req: Request):
         if not ok:
             # 异常结果也以结构化字段附加，便于日志平台按字段查看。
             logger.warning("Webhook 处理结果异常", extra={"webhook_result": result})
+            status_label = "error"
         return result
     except json.JSONDecodeError as e:
         logger.warning("JSON 解析失败: %s", e)
+        status_label = "error"
+        try:
+            inc_webhook_error("invalid_json")
+        except Exception:
+            pass
         return {"ok": False, "error": "Invalid JSON"}
     except ValueError as e:
         logger.warning("数据验证失败: %s", e)
+        status_label = "error"
+        try:
+            inc_webhook_error("validation_failed")
+        except Exception:
+            pass
         return {"ok": False, "error": "Validation failed"}
     except Exception as e:
         logger.error("处理 Webhook 请求失败: %s", e, exc_info=True)
+        status_label = "error"
+        try:
+            inc_webhook_error("internal_error")
+        except Exception:
+            pass
         return {"ok": False, "error": "Internal error"}
     finally:
+        try:
+            timer.observe_duration()
+        except Exception:
+            pass
+        try:
+            WebhookRequestsTotal.labels(status=status_label).inc()
+        except Exception:
+            pass
         set_trace_id("-")
 
 

@@ -25,6 +25,12 @@ import matplotlib.dates as mdates
 import requests
 
 from ..core.logging_config import get_logger
+from ..core.metrics import (
+    ImageGenerateFailuresTotal,
+    PrometheusRequestDuration,
+    PrometheusRequestsByDatasourceTotal,
+    PrometheusRequestsTotal,
+)
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -853,6 +859,7 @@ def generate_plot_from_generator_url(
         if effective_ds == "auto":
             effective_ds = "victoriametrics" if _is_datasource_victoriametrics(generator_url) else "prometheus"
             logger.debug("datasource 自动推断为: %s", effective_ds)
+        ds_label = effective_ds if effective_ds in ("prometheus", "victoriametrics") else "unknown"
         # VM：仅当 alert_labels 全为标量时注入；合并告警（含列表）不注入，靠请求后多值过滤
         # Prometheus：仅当 inject_labels 为 True 且全标量时注入
         should_inject = (
@@ -894,15 +901,45 @@ def generate_plot_from_generator_url(
             step,
             lookback_minutes,
         )
-        response = requests.post(
-            prometheus_api,
-            data=params,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=timeout_seconds,
-            proxies=proxies,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        # 记录 Prometheus 请求耗时与结果状态
+        import time as _time
+
+        t0 = _time.perf_counter()
+        metric_status = "ok"
+        try:
+            response = requests.post(
+                prometheus_api,
+                data=params,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=timeout_seconds,
+                proxies=proxies,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as req_exc:
+            metric_status = "error"
+            # 按请求失败原因记录出图失败（网络/超时/HTTP 等）
+            reason = "network"
+            if isinstance(req_exc, requests.exceptions.Timeout):
+                reason = "timeout"
+            elif isinstance(req_exc, requests.exceptions.HTTPError):
+                reason = "http_error"
+            try:
+                ImageGenerateFailuresTotal.labels(source="prometheus", reason=reason).inc()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                elapsed = _time.perf_counter() - t0
+                PrometheusRequestDuration.observe(elapsed)
+                PrometheusRequestsTotal.labels(status=metric_status).inc()
+                PrometheusRequestsByDatasourceTotal.labels(
+                    status=metric_status,
+                    datasource=ds_label,
+                ).inc()
+            except Exception:
+                pass
         data = payload.get("data", {})
         result = data.get("result", [])
         
@@ -949,6 +986,10 @@ def generate_plot_from_generator_url(
 
         if payload.get("status") != "success" or not isinstance(result, list) or not result:
             logger.info("Prometheus query_range 无可绘制数据，跳过出图")
+            try:
+                ImageGenerateFailuresTotal.labels(source="prometheus", reason="no_data").inc()
+            except Exception:
+                pass
             return None
 
         # 校验：若图里最大值很小（如 0–5），而告警应为计数类（如当前值：727），说明表达式可能未剥离比较符，query_range 返回的是 0/1

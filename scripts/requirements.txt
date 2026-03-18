@@ -10,3 +10,4 @@ kaleido==0.2.1  # Plotly 静态图片导出引擎
 numpy==1.26.4  # 数据处理（如果还没有）
 python-dateutil==2.9.0  # 日期解析（如果还没有）
 python-dotenv>=1.0.1  # 更新以满足 pymilvus 的要求
+prometheus_client>=0.20.0

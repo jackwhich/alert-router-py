@@ -6,7 +6,7 @@
 import logging
 from typing import Dict, List, Optional
 
-from requests.exceptions import HTTPError, RequestException
+from requests.exceptions import HTTPError, RequestException, Timeout, ConnectionError as RequestsConnectionError
 
 from ..routing.grafana_dedup import should_skip_grafana_duplicate
 from ..routing.jenkins_dedup import should_skip_jenkins_firing
@@ -16,6 +16,16 @@ from ..templates.template_renderer import render
 from .image_service import ImageService
 from .channel_filter import ChannelFilter
 from ..adapters.alert_normalizer import normalize
+from ..core.metrics import (
+    AlertsDedupSkippedTotal,
+    AlertsReceivedTotal,
+    AlertsRoutedTotal,
+    ChannelHttpFailuresTotal,
+    ChannelSendDuration,
+    inc_alerts_parse_failure,
+    inc_alerts_send_failure,
+    inc_alerts_sent,
+)
 
 logger = logging.getLogger("alert-router")
 
@@ -47,10 +57,35 @@ class AlertService:
         Returns:
             处理结果字典
         """
-        alerts = normalize(payload)
+        try:
+            alerts = normalize(payload)
+        except Exception as e:
+            logger.warning("normalize 过程中发生异常，无法解析告警数据格式: %s", e, exc_info=True)
+            source = payload.get("receiver") or "unknown"
+            try:
+                inc_alerts_parse_failure(source, "normalize_error")
+            except Exception:
+                pass
+            return {"ok": False, "error": "无法解析告警数据格式"}
+
         if not alerts:
             logger.warning("无法解析告警数据格式")
+            source = payload.get("receiver") or "unknown"
+            try:
+                inc_alerts_parse_failure(source, "empty_alerts")
+            except Exception:
+                pass
             return {"ok": False, "error": "无法解析告警数据格式"}
+
+        # 记录接收告警数量（按来源与状态）
+        for a in alerts:
+            labels = a.get("labels", {}) or {}
+            source = a.get("_source") or labels.get("_source") or (payload.get("receiver") or "unknown")
+            status = a.get("status", payload.get("status") or "unknown")
+            try:
+                AlertsReceivedTotal.labels(source=source, status=status).inc()
+            except Exception:
+                pass
 
         alert_summary = ", ".join(a.get("labels", {}).get("alertname", "?") for a in alerts)
         logger.info(f"[处理] 收到告警请求: {len(alerts)} 条 [{alert_summary}]")
@@ -79,6 +114,10 @@ class AlertService:
         # Jenkins 告警去重
         if should_skip_jenkins_firing(alert, labels, alert_status, self.config):
             logger.info(f"告警 {alertname} 命中 Jenkins 去重窗口，跳过重复 firing 通知")
+            try:
+                AlertsDedupSkippedTotal.labels(type="jenkins").inc()
+            except Exception:
+                pass
             return [{
                 "alert": alertname,
                 "skipped": "jenkins 去重窗口内重复 firing",
@@ -90,6 +129,10 @@ class AlertService:
         # Grafana 告警去重（同一 fingerprint+status 短时间窗口内只发一次）
         if source == "grafana" and should_skip_grafana_duplicate(alert, alert_status, self.config):
             logger.info(f"告警 {alertname} 命中 Grafana 去重窗口，跳过重复通知")
+            try:
+                AlertsDedupSkippedTotal.labels(type="grafana").inc()
+            except Exception:
+                pass
             return [{
                 "alert": alertname,
                 "skipped": "grafana 去重窗口内重复",
@@ -105,6 +148,12 @@ class AlertService:
             match_labels["_receiver"] = receiver
         target_channels = route(match_labels, self.config)
         logger.info(f"[处理] 告警 {alertname} 路由到渠道: {target_channels}")
+        # 记录路由到各渠道的次数
+        for ch_name in target_channels:
+            try:
+                AlertsRoutedTotal.labels(channel=ch_name).inc()
+            except Exception:
+                pass
 
         # 构建模板上下文
         ctx = self._build_template_context(alert, labels)
@@ -213,11 +262,19 @@ class AlertService:
         if not channel:
             error_msg = f"渠道不存在: {channel_name}"
             logger.warning(f"告警 {alertname}: {error_msg}")
+            try:
+                inc_alerts_sent(channel_name, "skipped")
+            except Exception:
+                pass
             return {"alert": alertname, "channel": channel_name, "error": error_msg}
 
         # 检查渠道是否启用
         if not channel.enabled:
             logger.debug(f"告警 {alertname} 跳过已禁用的渠道: {channel_name}")
+            try:
+                inc_alerts_sent(channel_name, "skipped")
+            except Exception:
+                pass
             return {"alert": alertname, "channel": channel_name, "skipped": "渠道已禁用"}
 
         # 检查是否发送 resolved 状态
@@ -225,8 +282,15 @@ class AlertService:
             logger.debug(
                 f"告警 {alertname} 跳过 resolved 状态（渠道 {channel_name} 配置为不发送 resolved）"
             )
+            try:
+                inc_alerts_sent(channel_name, "skipped")
+            except Exception:
+                pass
             return {"alert": alertname, "channel": channel_name, "skipped": "resolved 状态已禁用"}
 
+        import time as _time
+
+        started_at = _time.perf_counter()
         try:
             # 渲染模板
             body = render(channel.template, ctx)
@@ -267,6 +331,16 @@ class AlertService:
             else:
                 send_webhook(channel, body)
 
+            try:
+                ChannelSendDuration.labels(channel=channel_name, type=channel.type).observe(
+                    _time.perf_counter() - started_at
+                )
+            except Exception:
+                pass
+            try:
+                inc_alerts_sent(channel_name, "success")
+            except Exception:
+                pass
             return {
                 "alert": alertname,
                 "channel": channel_name,
@@ -292,6 +366,27 @@ class AlertService:
                     f"告警 {alertname} 发送到渠道 {channel_name} 失败: {error_msg}",
                     exc_info=True,
                 )
+            # 记录发送失败及原因
+            reason = "network"
+            if isinstance(e, Timeout):
+                reason = "timeout"
+            elif isinstance(e, RequestsConnectionError):
+                reason = "network"
+            elif isinstance(e, HTTPError):
+                reason = "http_error"
+                if e.response is not None and e.response.status_code:
+                    try:
+                        ChannelHttpFailuresTotal.labels(
+                            channel=channel_name,
+                            code=str(e.response.status_code),
+                        ).inc()
+                    except Exception:
+                        pass
+            try:
+                inc_alerts_sent(channel_name, "failure")
+                inc_alerts_send_failure(channel_name, reason)
+            except Exception:
+                pass
             return {"alert": alertname, "channel": channel_name, "error": error_msg}
         except Exception as e:
             error_msg = str(e)
@@ -299,4 +394,9 @@ class AlertService:
                 f"告警 {alertname} 发送到渠道 {channel_name} 发生未预期错误: {error_msg}",
                 exc_info=True,
             )
+            try:
+                inc_alerts_sent(channel_name, "failure")
+                inc_alerts_send_failure(channel_name, "unknown")
+            except Exception:
+                pass
             raise

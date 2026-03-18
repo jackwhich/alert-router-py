@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from ..plotters.prometheus_plotter import generate_plot_from_generator_url
 from ..plotters.grafana_plotter import generate_plot_from_grafana_generator_url
 from ..core.models import Channel
+from ..core.metrics import ImageGenerateFailuresTotal, ImageGeneratedTotal
 
 logger = logging.getLogger("alert-router")
 
@@ -87,6 +88,7 @@ class ImageService:
         """
         image_cfg = self.config.get("prometheus_image", {}) or {}
         if not image_cfg.get("enabled", True):
+            # 配置关闭，不视为失败
             return None
 
         # 过滤出需要图片的 Telegram 渠道
@@ -96,6 +98,7 @@ class ImageService:
         )
         
         if not image_channels:
+            # 无需要图片的渠道，不视为失败
             return None
 
         # 根据配置决定是否使用代理
@@ -129,28 +132,44 @@ class ImageService:
         if datasource_type is not None and not isinstance(datasource_type, str):
             datasource_type = None
         inject_labels = image_cfg.get("inject_labels")
-        image_bytes = generate_plot_from_generator_url(
-            alert.get("generatorURL", ""),
-            prometheus_url=prometheus_url,
-            proxies=plot_proxy,
-            lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
-            step=str(image_cfg.get("step", "30s")),
-            timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
-            max_series=int(image_cfg.get("max_series", 8)),
-            alertname=alertname,
-            alert_time=alert_time,
-            use_plotly=use_plotly,
-            alert_labels=alert.get("labels") or {},
-            legend_label_whitelist=legend_whitelist,
-            datasource_type=datasource_type,
-            inject_labels=inject_labels if isinstance(inject_labels, bool) else None,
-        )
-        
+        try:
+            image_bytes = generate_plot_from_generator_url(
+                alert.get("generatorURL", ""),
+                prometheus_url=prometheus_url,
+                proxies=plot_proxy,
+                lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
+                step=str(image_cfg.get("step", "30s")),
+                timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
+                max_series=int(image_cfg.get("max_series", 8)),
+                alertname=alertname,
+                alert_time=alert_time,
+                use_plotly=use_plotly,
+                alert_labels=alert.get("labels") or {},
+                legend_label_whitelist=legend_whitelist,
+                datasource_type=datasource_type,
+                inject_labels=inject_labels if isinstance(inject_labels, bool) else None,
+            )
+        except Exception as exc:
+            logger.warning("Prometheus 趋势图生成异常: %s", exc, exc_info=True)
+            image_bytes = None
+            try:
+                ImageGenerateFailuresTotal.labels(source="prometheus", reason="export_error").inc()
+            except Exception:
+                pass
+
         if image_bytes:
             logger.info(f"告警 {alertname} 已生成趋势图，将优先按图片发送 Telegram")
+            try:
+                ImageGeneratedTotal.labels(source="prometheus", status="ok").inc()
+            except Exception:
+                pass
         else:
             logger.info(f"告警 {alertname} 未生成趋势图，将按文本发送 Telegram")
-        
+            try:
+                ImageGeneratedTotal.labels(source="prometheus", status="fail").inc()
+            except Exception:
+                pass
+
         return image_bytes
     
     def _generate_grafana_image(
