@@ -2,9 +2,16 @@
 Prometheus 指标定义模块
 
 对齐 alert-router-go/internal/metrics/metrics.go 中的指标，统一前缀 webhook_alerts_，
-并在此基础上扩展更细粒度的观测指标。
+并在此基础上扩展更细粒度的观测指标（HTTP 与业务维度）。
 """
-from prometheus_client import Counter, Histogram
+from prometheus_client import (
+    Counter,
+    Histogram,
+    GCCollector,
+    ProcessCollector,
+    PlatformCollector,
+    REGISTRY,
+)
 
 
 _PREFIX = "webhook_alerts_"
@@ -121,6 +128,30 @@ ImageGenerateFailuresTotal = Counter(
     labelnames=("source", "reason"),
 )
 
+HttpServerRequestsTotal = Counter(
+    _PREFIX + "http_server_requests_total",
+    "HTTP 入口请求次数（按 path/method/status）",
+    labelnames=("path", "method", "status"),
+)
+
+HttpServerRequestDuration = Histogram(
+    _PREFIX + "http_server_request_duration_seconds",
+    "HTTP 入口请求耗时（按 path/method/status）",
+    labelnames=("path", "method", "status"),
+)
+
+HttpClientRequestsTotal = Counter(
+    _PREFIX + "http_client_requests_total",
+    "HTTP 下游请求次数（按 target/method/status）",
+    labelnames=("target", "method", "status"),
+)
+
+HttpClientRequestDuration = Histogram(
+    _PREFIX + "http_client_request_duration_seconds",
+    "HTTP 下游请求耗时（按 target/method/status）",
+    labelnames=("target", "method", "status"),
+)
+
 AlertsSentByNameTotal = Counter(
     _PREFIX + "alerts_sent_by_name_total",
     "按渠道、告警名称、状态与结果统计的发送次数",
@@ -194,4 +225,11 @@ def inc_alerts_sent_by_severity(
         severity=severity or "unknown",
         result=result or "unknown",
     ).inc()
+
+
+# 显式注册进程/解释器相关 Collector，补充 process_* / python_* / gc_* 指标
+ProcessCollector(registry=REGISTRY)
+PlatformCollector(registry=REGISTRY)
+GCCollector(registry=REGISTRY)
+
 

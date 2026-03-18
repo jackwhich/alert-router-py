@@ -25,6 +25,7 @@ import matplotlib.dates as mdates
 import requests
 
 from ..core.logging_config import get_logger
+from ..core.http_metrics import request_with_metrics
 from ..core.metrics import (
     ImageGenerateFailuresTotal,
     PrometheusRequestDuration,
@@ -907,14 +908,17 @@ def generate_plot_from_generator_url(
         t0 = _time.perf_counter()
         metric_status = "ok"
         try:
-            response = requests.post(
+            session = requests.Session()
+            response = request_with_metrics(
+                session,
+                "POST",
                 prometheus_api,
+                target=ds_label,
                 data=params,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=timeout_seconds,
                 proxies=proxies,
             )
-            response.raise_for_status()
             payload = response.json()
         except requests.RequestException as req_exc:
             metric_status = "error"

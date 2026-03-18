@@ -16,6 +16,7 @@ from urllib3.util.retry import Retry
 from ..core.logging_config import get_logger
 from ..core.utils import detect_template_format
 from ..core.models import Channel
+from ..core.http_metrics import request_with_metrics
 
 logger = get_logger("alert-router")
 
@@ -168,7 +169,13 @@ def send_telegram(
                 "发送 Telegram 消息的完整 payload",
                 extra={"telegram_request": payload},
             )
-        response = session.post(url, **kwargs)
+        response = request_with_metrics(
+            session,
+            "POST",
+            url,
+            target="telegram",
+            **kwargs,
+        )
         response.raise_for_status()
         logger.info(f"[Telegram] 渠道 [{ch.name}] 发送成功, 状态码: {response.status_code}")
         if logger.isEnabledFor(logging.DEBUG):
@@ -292,7 +299,13 @@ def _post_webhook(
     channel_name: str,
     **kwargs,
 ):
-    response = session.post(url, **kwargs)
+    response = request_with_metrics(
+        session,
+        "POST",
+        url,
+        target="webhook",
+        **kwargs,
+    )
     response.raise_for_status()
     logger.info(f"Webhook 消息发送成功 (渠道: {channel_name})，响应状态码: {response.status_code}")
     if logger.isEnabledFor(logging.DEBUG):

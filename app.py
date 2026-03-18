@@ -11,6 +11,7 @@ FastAPI 应用主入口
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
@@ -19,6 +20,8 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from alert_router.core.config import load_config
 from alert_router.core.logging_config import new_trace_id, set_trace_id, setup_logging
 from alert_router.core.metrics import (
+    HttpServerRequestDuration,
+    HttpServerRequestsTotal,
     WebhookRequestDuration,
     WebhookRequestsTotal,
     inc_webhook_error,
@@ -82,6 +85,39 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, redirect_slashes=False)
+
+
+@app.middleware("http")
+async def http_metrics_middleware(request: Request, call_next):
+    """
+    通用 HTTP Server 指标中间件：
+    - webhook_alerts_http_server_requests_total{path,method,status}
+    - webhook_alerts_http_server_request_duration_seconds{path,method,status}
+    """
+    path = request.url.path
+    method = request.method.upper()
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response: Response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        elapsed = time.perf_counter() - start
+        # 避免指标异常影响主流程
+        try:
+            HttpServerRequestsTotal.labels(
+                path=path,
+                method=method,
+                status=str(status_code),
+            ).inc()
+            HttpServerRequestDuration.labels(
+                path=path,
+                method=method,
+                status=str(status_code),
+            ).observe(elapsed)
+        except Exception:
+            pass
 
 
 @app.get("/metrics")

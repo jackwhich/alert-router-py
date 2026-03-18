@@ -18,6 +18,7 @@ import matplotlib.dates as mdates
 import requests
 
 from ..core.logging_config import get_logger
+from ..core.http_metrics import request_with_metrics
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -189,8 +190,12 @@ def _generate_from_prometheus_query(
             "从 Grafana generatorURL 提取查询，请求 Prometheus query_range: api=%s",
             prometheus_api,
         )
-        response = requests.get(
+        session = requests.Session()
+        response = request_with_metrics(
+            session,
+            "GET",
             prometheus_api,
+            target="prometheus",
             params=params,
             timeout=timeout_seconds,
             proxies=proxies,
@@ -438,8 +443,12 @@ def _generate_from_grafana_alert_rule(
         
         logger.debug(f"从 Grafana API 获取告警规则详情: {api_url}")
         headers = _build_grafana_headers(grafana_api_token)
-        response = requests.get(
+        session = requests.Session()
+        response = request_with_metrics(
+            session,
+            "GET",
             api_url,
+            target="grafana",
             timeout=timeout_seconds,
             proxies=proxies,
             headers=headers,
@@ -505,8 +514,12 @@ def _generate_from_grafana_alert_rule(
             prometheus_api,
             prometheus_query[:100] if len(prometheus_query) > 100 else prometheus_query,
         )
-        response = requests.get(
+        session = requests.Session()
+        response = request_with_metrics(
+            session,
+            "GET",
             prometheus_api,
+            target="prometheus",
             params=params,
             timeout=timeout_seconds,
             proxies=proxies,
@@ -739,8 +752,12 @@ def _generate_from_grafana_renderer(
         api_url = f"{grafana_base}/api/alerting/rule/{rule_uid}"
         logger.debug(f"从 Grafana API 获取告警规则详情: {api_url}")
         headers = _build_grafana_headers(grafana_api_token)
-        response = requests.get(
+        session = requests.Session()
+        response = request_with_metrics(
+            session,
+            "GET",
             api_url,
+            target="grafana",
             timeout=timeout_seconds,
             proxies=proxies,
             headers=headers,
@@ -804,8 +821,12 @@ def _generate_from_grafana_renderer(
         }
         
         logger.debug(f"使用 Grafana 渲染服务生成图片: {render_url}")
-        response = requests.get(
+        session = requests.Session()
+        response = request_with_metrics(
+            session,
+            "GET",
             render_url,
+            target="grafana",
             params=params,
             timeout=timeout_seconds + 5,  # 渲染可能需要更长时间
             proxies=proxies,
