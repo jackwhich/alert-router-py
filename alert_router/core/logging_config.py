@@ -72,7 +72,7 @@ class TraceIdFilter(logging.Filter):
 
 
 class JsonFormatter(logging.Formatter):
-    """统一 JSON 单行日志格式。"""
+    """统一 JSON 单行日志格式（用于文件，便于机器解析）。"""
 
     def format(self, record: logging.LogRecord) -> str:
         code_loc = f"{record.filename}:{record.lineno}"
@@ -94,6 +94,29 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)
+
+
+class ConsoleFormatter(logging.Formatter):
+    """控制台人类可读格式：不把 message 再包一层 JSON，保留真实换行，便于直接阅读 payload。"""
+
+    def format(self, record: logging.LogRecord) -> str:
+        code_loc = f"{record.filename}:{record.lineno}"
+        code_class = getattr(record, "code_class", None)
+        if code_class:
+            code_value = f"{code_class} ({code_loc})"
+        else:
+            code_value = code_loc
+        ts = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        trace_id = getattr(record, "traceId", "-")
+        head = f"{ts} {record.levelname:5} [{trace_id}] {code_value} - "
+        msg = record.getMessage()
+        if record.exc_info:
+            msg += "\n" + self.formatException(record.exc_info)
+        # 多行 message 时首行带 head，后续行缩进对齐，便于阅读
+        if "\n" in msg:
+            lines = msg.split("\n")
+            return head + "\n  ".join(lines)
+        return head + msg
 
 
 def setup_logging(
@@ -154,13 +177,11 @@ def setup_logging(
     file_handler.addFilter(trace_filter)
     logger.addHandler(file_handler)
     
-    # 控制台 handler：仅在交互式终端中才添加，避免在后台运行时重复输出
-    # 检测 stderr 是否为 TTY（终端），如果是则添加 console_handler
-    # 如果 stderr 被重定向到文件（如通过脚本启动时的 2>&1），则不添加，避免日志重复
+    # 控制台 handler：人类可读格式，不转义换行，便于直接看 payload；仅 TTY 时添加
     if sys.stderr.isatty():
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(log_level)
-        console_handler.setFormatter(formatter)
+        console_handler.setFormatter(ConsoleFormatter())
         console_handler.addFilter(trace_filter)
         logger.addHandler(console_handler)
     

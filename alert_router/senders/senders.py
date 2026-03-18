@@ -112,9 +112,9 @@ def send_telegram(
     if parse_mode is None and ch.template:
         parse_mode = detect_template_format(ch.template)
 
-    # 纯文本模式下把模板里的 <br> 转为换行，避免在 Telegram 里显示成字面 "<br>"
-    if parse_mode == "":
-        text = (text or "").replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    # Telegram HTML 模式不支持 <br>，只支持 <b>/<i>/<code> 等；统一把 <br> 转为换行，避免 400 "Unsupported start tag br"
+    text = (text or "")
+    text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
 
     # 文本限制：caption 最大 1024，message 最大 4096，且不能为空
     text_safe = (text or "").strip() or " "
