@@ -163,12 +163,26 @@ def send_telegram(
             f"[Telegram] 渠道 [{ch.name}] 请求: {method}, chat_id={ch.chat_id}, parse_mode={parse_mode or '(无)'}"
         )
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"发送 Telegram 消息的完整 payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
+            # 在 JSON 日志中通过结构化字段输出 Telegram 请求 payload
+            logger.debug(
+                "发送 Telegram 消息的完整 payload",
+                extra={"telegram_request": payload},
+            )
         response = session.post(url, **kwargs)
         response.raise_for_status()
         logger.info(f"[Telegram] 渠道 [{ch.name}] 发送成功, 状态码: {response.status_code}")
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Telegram 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+            try:
+                resp_json = response.json()
+            except (ValueError, json.JSONDecodeError):
+                resp_json = None
+            if resp_json is not None:
+                logger.debug(
+                    "Telegram 响应内容",
+                    extra={"telegram_response": resp_json},
+                )
+            else:
+                logger.debug("Telegram 响应内容（非 JSON）", extra={"telegram_response_text": response.text})
         return response
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code == 400:
@@ -176,12 +190,16 @@ def send_telegram(
                 err_body = e.response.text
                 if err_body and logger.isEnabledFor(logging.DEBUG):
                     try:
-                        err_pretty = json.dumps(
-                            json.loads(err_body), ensure_ascii=False, indent=2
+                        err_json = json.loads(err_body)
+                        logger.debug(
+                            "Telegram 400 响应",
+                            extra={"telegram_response": err_json},
                         )
                     except (json.JSONDecodeError, TypeError):
-                        err_pretty = err_body[:800]
-                    logger.debug("Telegram 400 响应:\n%s", err_pretty)
+                        logger.debug(
+                            "Telegram 400 响应（非 JSON）",
+                            extra={"telegram_response_text": err_body[:800]},
+                        )
             except Exception:
                 pass
         # 400 且使用了 parse_mode 时，可能是 HTML 解析错误，用纯文本重试一次（保留图片）
@@ -261,7 +279,11 @@ def send_webhook(ch: Channel, body: str):
 def _log_webhook_request(channel_name: str, url: str, body: str):
     logger.info(f"发送 Webhook 消息到渠道 [{channel_name}]，URL: {url}")
     if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"发送 Webhook 消息的完整 body:\n{body}")
+        # 发送前记录下游 Webhook 请求体（可能是 JSON 字符串或其他格式）
+        logger.debug(
+            "发送 Webhook 消息的完整 body",
+            extra={"webhook_body": body},
+        )
 
 
 def _post_webhook(
@@ -275,9 +297,16 @@ def _post_webhook(
     logger.info(f"Webhook 消息发送成功 (渠道: {channel_name})，响应状态码: {response.status_code}")
     if logger.isEnabledFor(logging.DEBUG):
         try:
-            logger.debug(f"Webhook 响应内容:\n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+            resp_json = response.json()
+            logger.debug(
+                "Webhook 响应内容",
+                extra={"webhook_response": resp_json},
+            )
         except (json.JSONDecodeError, ValueError):
-            logger.debug(f"Webhook 响应内容（非 JSON）:\n{response.text}")
+            logger.debug(
+                "Webhook 响应内容（非 JSON）",
+                extra={"webhook_response_text": response.text},
+            )
     return response
 
 

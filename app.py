@@ -114,23 +114,16 @@ async def webhook(req: Request):
             alerts_count,
         )
         if logger.isEnabledFor(logging.DEBUG):
-            raw_preview = json.dumps(payload, ensure_ascii=False, indent=2)
-            if len(raw_preview) > 12000:
-                raw_preview = raw_preview[:12000] + "\n... (截断)"
-            logger.debug("接收完整 Webhook 负载:\n%s", raw_preview)
+            # 在 JSON 日志中以结构化字段输出完整 payload，避免再 dumps 成字符串。
+            logger.debug("接收完整 Webhook 负载", extra={"payload": payload})
 
         result = _handle_webhook(payload)
         ok = result.get("ok", False)
         sent = result.get("sent", [])
         logger.info("Webhook 处理完成, 成功=%s, 发送结果数=%s", ok, len(sent))
         if not ok:
-            try:
-                logger.warning(
-                    "Webhook 处理结果异常:\n%s",
-                    json.dumps(result, ensure_ascii=False, indent=2),
-                )
-            except (TypeError, ValueError):
-                logger.warning("Webhook 处理结果异常: %s", result)
+            # 异常结果也以结构化字段附加，便于日志平台按字段查看。
+            logger.warning("Webhook 处理结果异常", extra={"webhook_result": result})
         return result
     except json.JSONDecodeError as e:
         logger.warning("JSON 解析失败: %s", e)

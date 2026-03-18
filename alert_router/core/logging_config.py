@@ -72,7 +72,11 @@ class TraceIdFilter(logging.Filter):
 
 
 class JsonFormatter(logging.Formatter):
-    """统一 JSON 单行日志格式（用于文件，便于机器解析）。"""
+    """统一 JSON 单行日志格式（用于文件/采集，一行一个 JSON）。
+
+    支持通过 logger.extra 附加结构化字段（如 payload、telegram_response 等），
+    一并序列化进最终 JSON，避免把大 JSON 再 dumps 成字符串塞进 message。
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         code_loc = f"{record.filename}:{record.lineno}"
@@ -93,6 +97,42 @@ class JsonFormatter(logging.Formatter):
             payload["class"] = code_class
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
+
+        # 将 logger.extra 中的结构化字段一并输出到 JSON（如 payload、telegram_request 等）
+        # 过滤掉标准 logging 属性与内部字段，避免覆盖核心字段。
+        standard_keys = {
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "traceId",
+            "code_class",
+        }
+        for key, value in record.__dict__.items():
+            if key.startswith("_"):
+                continue
+            if key in standard_keys:
+                continue
+            if key in payload:
+                continue
+            payload[key] = value
+
         return json.dumps(payload, ensure_ascii=False)
 
 
