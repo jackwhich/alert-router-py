@@ -23,8 +23,12 @@ from ..core.metrics import (
     ChannelHttpFailuresTotal,
     ChannelSendDuration,
     inc_alerts_parse_failure,
+    inc_alerts_received_by_name,
+    inc_alerts_received_by_severity,
     inc_alerts_send_failure,
     inc_alerts_sent,
+    inc_alerts_sent_by_name,
+    inc_alerts_sent_by_severity,
 )
 
 logger = logging.getLogger("alert-router")
@@ -77,13 +81,17 @@ class AlertService:
                 pass
             return {"ok": False, "error": "无法解析告警数据格式"}
 
-        # 记录接收告警数量（按来源与状态）
+        # 记录接收告警数量（按来源、名称、严重级别与状态）
         for a in alerts:
             labels = a.get("labels", {}) or {}
             source = a.get("_source") or labels.get("_source") or (payload.get("receiver") or "unknown")
             status = a.get("status", payload.get("status") or "unknown")
+            alertname = labels.get("alertname") or "unknown"
+            severity = labels.get("severity") or "unknown"
             try:
                 AlertsReceivedTotal.labels(source=source, status=status).inc()
+                inc_alerts_received_by_name(source, alertname, status)
+                inc_alerts_received_by_severity(source, severity, status)
             except Exception:
                 pass
 
@@ -264,6 +272,8 @@ class AlertService:
             logger.warning(f"告警 {alertname}: {error_msg}")
             try:
                 inc_alerts_sent(channel_name, "skipped")
+                inc_alerts_sent_by_name(channel_name, alertname, alert_status, "skipped")
+                inc_alerts_sent_by_severity(channel_name, (alert.get("labels") or {}).get("severity") or "unknown", "skipped")
             except Exception:
                 pass
             return {"alert": alertname, "channel": channel_name, "error": error_msg}
@@ -273,6 +283,8 @@ class AlertService:
             logger.debug(f"告警 {alertname} 跳过已禁用的渠道: {channel_name}")
             try:
                 inc_alerts_sent(channel_name, "skipped")
+                inc_alerts_sent_by_name(channel_name, alertname, alert_status, "skipped")
+                inc_alerts_sent_by_severity(channel_name, (alert.get("labels") or {}).get("severity") or "unknown", "skipped")
             except Exception:
                 pass
             return {"alert": alertname, "channel": channel_name, "skipped": "渠道已禁用"}
@@ -284,6 +296,8 @@ class AlertService:
             )
             try:
                 inc_alerts_sent(channel_name, "skipped")
+                inc_alerts_sent_by_name(channel_name, alertname, alert_status, "skipped")
+                inc_alerts_sent_by_severity(channel_name, (alert.get("labels") or {}).get("severity") or "unknown", "skipped")
             except Exception:
                 pass
             return {"alert": alertname, "channel": channel_name, "skipped": "resolved 状态已禁用"}
@@ -339,6 +353,8 @@ class AlertService:
                 pass
             try:
                 inc_alerts_sent(channel_name, "success")
+                inc_alerts_sent_by_name(channel_name, alertname, alert_status, "success")
+                inc_alerts_sent_by_severity(channel_name, (alert.get("labels") or {}).get("severity") or "unknown", "success")
             except Exception:
                 pass
             return {
@@ -385,6 +401,8 @@ class AlertService:
             try:
                 inc_alerts_sent(channel_name, "failure")
                 inc_alerts_send_failure(channel_name, reason)
+                inc_alerts_sent_by_name(channel_name, alertname, alert_status, "failure")
+                inc_alerts_sent_by_severity(channel_name, (alert.get("labels") or {}).get("severity") or "unknown", "failure")
             except Exception:
                 pass
             return {"alert": alertname, "channel": channel_name, "error": error_msg}
@@ -397,6 +415,8 @@ class AlertService:
             try:
                 inc_alerts_sent(channel_name, "failure")
                 inc_alerts_send_failure(channel_name, "unknown")
+                inc_alerts_sent_by_name(channel_name, alertname, alert_status, "failure")
+                inc_alerts_sent_by_severity(channel_name, (alert.get("labels") or {}).get("severity") or "unknown", "failure")
             except Exception:
                 pass
             raise

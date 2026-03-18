@@ -79,6 +79,18 @@ AlertsParseFailuresTotal = Counter(
     labelnames=("source", "reason"),
 )
 
+AlertsReceivedByNameTotal = Counter(
+    _PREFIX + "alerts_received_by_name_total",
+    "按来源、告警名称与状态统计的接收告警数",
+    labelnames=("source", "alertname", "status"),
+)
+
+AlertsReceivedBySeverityTotal = Counter(
+    _PREFIX + "alerts_received_by_severity_total",
+    "按来源、严重级别与状态统计的接收告警数",
+    labelnames=("source", "severity", "status"),
+)
+
 WebhookErrorsTotal = Counter(
     _PREFIX + "webhook_errors_total",
     "Webhook 入口错误次数（按错误类型统计）",
@@ -109,6 +121,18 @@ ImageGenerateFailuresTotal = Counter(
     labelnames=("source", "reason"),
 )
 
+AlertsSentByNameTotal = Counter(
+    _PREFIX + "alerts_sent_by_name_total",
+    "按渠道、告警名称、状态与结果统计的发送次数",
+    labelnames=("channel", "alertname", "status", "result"),
+)
+
+AlertsSentBySeverityTotal = Counter(
+    _PREFIX + "alerts_sent_by_severity_total",
+    "按渠道、严重级别与结果统计的发送次数",
+    labelnames=("channel", "severity", "result"),
+)
+
 
 def inc_alerts_sent(channel: str, status: str) -> None:
     """记录一次发送结果（success/failure/skipped）。"""
@@ -128,4 +152,46 @@ def inc_alerts_parse_failure(source: str, reason: str) -> None:
 def inc_webhook_error(err_type: str) -> None:
     """记录一次 Webhook 入口错误。"""
     WebhookErrorsTotal.labels(type=err_type).inc()
+
+
+def inc_alerts_received_by_name(source: str, alertname: str, status: str) -> None:
+    AlertsReceivedByNameTotal.labels(
+        source=source or "unknown",
+        alertname=alertname or "unknown",
+        status=status or "unknown",
+    ).inc()
+
+
+def inc_alerts_received_by_severity(source: str, severity: str, status: str) -> None:
+    AlertsReceivedBySeverityTotal.labels(
+        source=source or "unknown",
+        severity=severity or "unknown",
+        status=status or "unknown",
+    ).inc()
+
+
+def inc_alerts_sent_by_name(
+    channel: str,
+    alertname: str,
+    status: str,
+    result: str,
+) -> None:
+    AlertsSentByNameTotal.labels(
+        channel=channel,
+        alertname=alertname or "unknown",
+        status=status or "unknown",
+        result=result or "unknown",
+    ).inc()
+
+
+def inc_alerts_sent_by_severity(
+    channel: str,
+    severity: str,
+    result: str,
+) -> None:
+    AlertsSentBySeverityTotal.labels(
+        channel=channel,
+        severity=severity or "unknown",
+        result=result or "unknown",
+    ).inc()
 
