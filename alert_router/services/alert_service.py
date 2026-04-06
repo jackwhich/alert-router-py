@@ -239,6 +239,8 @@ class AlertService:
             "startsAt": alert.get("startsAt", ""),
             "endsAt": alert.get("endsAt", ""),
             "generatorURL": alert.get("generatorURL", ""),
+            # Grafana webhook 顶层的 receiver（通知策略名），供模板按策略分支而非依赖 alertname 展示名
+            "receiver": alert.get("_receiver") or "",
         }
     
     def _send_to_channel(

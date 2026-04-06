@@ -1,0 +1,95 @@
+📊 来源: Grafana
+
+{# timeout/volume 仍按 alertname；manual 优先按 Grafana receiver（通知策略名），避免 alertname 仅为中文展示名时无法匹配 #}
+{% set an = (labels.get("alertname") or "") | string %}
+{% set rw = (labels.get("risk-withdraw-alarm") or "") | string %}
+{% set rec = (receiver or "") | string %}
+{% set kind = (
+  "timeout" if (an == "ris-mk-api-timeout-time-result-overtime" or "ris-mk-api-timeout-time-result-overtime" in an)
+  else "volume" if (an == "risk-reject-review-volume-overlimit" or "risk-reject-review-volume-overlimit" in an)
+  else "manual" if (
+    rec == "Withdrawal_Monitoring_Review"
+    or an == "risk-manual-review-alarm" or "risk-manual-review-alarm" in an
+    or rw == "risk-manual-review-alarm" or "risk-manual-review-alarm" in rw
+  )
+  else ""
+) %}
+
+{# --- ris-mk-api-timeout-time-result-overtime --- #}
+{% if kind == "timeout" and status == "firing" -%}
+🚨 [网络异常] 风控接口超时
+
+时间: {{ startsAt | e }}
+
+环境: 生产环境
+接口对应指标：RisMkApiTimeOutResult
+接口介绍：财务未返回超时处理
+
+说明: 接口响应时间超过设定阈值
+建议: 请技术排查网络或服务状态。
+{%- elif kind == "timeout" and status in ("resolved", "ok") -%}
+✅ [告警已恢复] 风控接口超时已恢复
+
+时间: {% if endsAt %}{{ endsAt | e }}{% else %}{{ startsAt | e }}{% endif %}
+{%- elif kind == "volume" and status == "firing" -%}
+⚠️ [业务激增]CW财务风控监控-拒绝/审核量级超标
+
+时间: {{ startsAt | e }}
+
+环境: 生产环境
+当前累计: {{ (annotations or {}).get("当前值", "> 100 笔 (10分钟内)") | e }}
+
+状态: 流量异常，请确认是否为攻击或模型误判。
+建议: 请运营登录后台查看积压情况。
+{%- elif kind == "volume" and status in ("resolved", "ok") -%}
+✅ [告警已恢复]CW财务风控监控-拒绝/审核量级超标 已恢复
+
+时间: {% if endsAt %}{{ endsAt | e }}{% else %}{{ startsAt | e }}{% endif %}
+{%- elif kind == "manual" and status == "firing" -%}
+[人工审核告警] 订单进入人工审核
+
+时间: {{ startsAt | e }}
+
+环境：prod环境
+
+
+状态：正在积压中，请及时处理
+建议：请运营登录后台查看人工审核订单及积压情况。
+{%- elif kind == "manual" and status in ("resolved", "ok") -%}
+[告警恢复] 订单人工审核-最近1分钟无新增
+
+时间: {% if endsAt %}{{ endsAt | e }}{% else %}{{ startsAt | e }}{% endif %}
+
+环境：prod环境
+
+
+状态：最近指标已恢复正常，请进入监控大盘查看历史积压情况
+{%- else -%}
+{% if status == "firing" -%}
+🚨🚨🚨🚨🚨🚨 状态: 告警
+{%- else -%}
+✅✅✅✅✅✅ 状态: 恢复
+{% endif %}
+
+
+时间: {% if status == "firing" %}{{ startsAt | e }}{% else %}{% if endsAt %}{{ endsAt | e }}{% else %}{{ startsAt | e }}{% endif %}{% endif %}
+{% for key, value in (labels or {}).items() %}
+{% if value is sequence and (value is not string) -%}
+{{ (key | e) ~ ': ' }}
+{% for v in (value | unique | sort) %}
+{{ (v | e) }}{% if not loop.last %},{% endif %}
+{% if not loop.last %}<br>{% endif %}
+{% endfor %}
+<br>
+{%- else -%}
+{{ (key | e) ~ ': ' ~ (value | e) }}<br>
+{%- endif %}
+{% endfor %}
+
+{% if (annotations or {}).get('当前值') -%}
+当前值: {{ (annotations or {}).get('当前值', '') | e }}
+{% endif %}
+{% if (annotations or {}).summary -%}
+summary: {{ (annotations or {}).summary | e }}
+{%- endif %}
+{% endif %}

@@ -170,7 +170,7 @@ channels:
     image_enabled: false
     bot_token: "xxxxx:AAFqy849KL-YdNykyE7KcPvYpoCRpNYH4Mc"
     chat_id: "-xxx"
-    template: "grafana_telegram.html.j2"
+    template: "grafana_telegram_manual_review.html.j2"
 
   grafana_telegram_critical:
     type: telegram
