@@ -230,7 +230,7 @@ routing:
 
   - match:
       _source: "prometheus"
-      alertname: "主机.*SSH.*|SSH登录.*|主机Root提权会话"
+      service: "SSH-LOGIN"
     send_to: ["prometheus_telegram_ssh_login"]
 
   - match:
