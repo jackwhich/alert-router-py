@@ -65,5 +65,5 @@ xxxxxxxx
 <b>摘要:</b> {{ annotations.summary | e }}
 {% endif %}
 {% if (annotations or {}).description %}
-<b>详情:</b> {{ annotations.description | e }}
+<b>详情:</b> {{ annotations.description | mask_ssh_fingerprint | e }}
 {% endif %}

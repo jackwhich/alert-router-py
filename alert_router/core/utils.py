@@ -147,6 +147,21 @@ def replace_times_in_description(description: str) -> str:
         return description  # 如果替换失败，返回原值
 
 
+def mask_ssh_fingerprint(text: str) -> str:
+    """Mask the last 8 chars of SSH SHA256 fingerprints in free-form text."""
+    if not text or not isinstance(text, str):
+        return text
+
+    def replace_match(match):
+        prefix = match.group(1)
+        fingerprint = match.group(2)
+        if len(fingerprint) <= 8:
+            return f"{prefix}xxxxxxxx"
+        return f"{prefix}{fingerprint[:-8]}xxxxxxxx"
+
+    return re.sub(r"(SHA256:)([A-Za-z0-9+/=]+)", replace_match, text)
+
+
 def url_to_link(text: str) -> str:
     """
     将文本中的 URL 转换为 HTML 链接标签

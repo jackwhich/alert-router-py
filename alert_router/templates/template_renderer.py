@@ -3,7 +3,7 @@
 """
 from typing import Dict, Any
 from jinja2 import Environment, FileSystemLoader
-from ..core.utils import convert_to_cst, replace_times_in_description, url_to_link
+from ..core.utils import convert_to_cst, mask_ssh_fingerprint, replace_times_in_description, url_to_link
 
 env = Environment(
     loader=FileSystemLoader("templates"),
@@ -14,6 +14,7 @@ env = Environment(
 # 注册自定义过滤器
 env.filters["url_to_link"] = url_to_link
 env.filters["convert_to_cst"] = convert_to_cst
+env.filters["mask_ssh_fingerprint"] = mask_ssh_fingerprint
 
 
 def render(template: str, ctx: Dict[str, Any]) -> str:
