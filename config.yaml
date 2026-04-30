@@ -229,8 +229,7 @@ routing:
     send_to: ["prometheus_telegram_jenkins"]
 
   - match:
-      _source: "prometheus"
-      service: "SSH-LOGIN"
+      _receiver: "ssh_login_alarm"
     send_to: ["prometheus_telegram_ssh_login"]
 
   - match:

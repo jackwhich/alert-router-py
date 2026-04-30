@@ -5,6 +5,26 @@
 {{ value | e }}
 {%- endif -%}
 {%- endmacro %}
+{% macro mask_last8(value) -%}
+{%- if value is sequence and (value is not string) -%}
+{%- for item in value | unique -%}
+{%- set text = item | string -%}
+{%- if text | length > 8 -%}
+{{ text[:-8] | e }}xxxxxxxx
+{%- else -%}
+xxxxxxxx
+{%- endif -%}
+{%- if not loop.last %}, {% endif -%}
+{%- endfor -%}
+{%- else -%}
+{%- set text = value | string -%}
+{%- if text | length > 8 -%}
+{{ text[:-8] | e }}xxxxxxxx
+{%- else -%}
+xxxxxxxx
+{%- endif -%}
+{%- endif -%}
+{%- endmacro %}
 🔐 <b>SSH 登录告警</b>
 <b>━━━━━━━━━━━━━━</b>
 
@@ -35,7 +55,7 @@
 <b>登录方式:</b> {{ show_value(labels.method) }}
 {% endif %}
 {% if labels.key_type is defined or labels.key_fingerprint is defined %}
-<b>公钥:</b> {{ show_value(labels.key_type | default('')) }} {{ show_value(labels.key_fingerprint | default('')) }}
+<b>公钥:</b> {{ show_value(labels.key_type | default('')) }}{% if labels.key_fingerprint is defined %} {{ mask_last8(labels.key_fingerprint) }}{% endif %}
 {% endif %}
 {% if labels.command is defined %}
 <b>命令:</b> <code>{{ show_value(labels.command) }}</code>
