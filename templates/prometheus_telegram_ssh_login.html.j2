@@ -1,3 +1,10 @@
+{% macro show_value(value) -%}
+{%- if value is sequence and (value is not string) -%}
+{{ value | unique | join(', ') | e }}
+{%- else -%}
+{{ value | e }}
+{%- endif -%}
+{%- endmacro %}
 🔐 <b>SSH 登录告警</b>
 <b>━━━━━━━━━━━━━━</b>
 
@@ -12,26 +19,26 @@
 <b>级别:</b> {{ labels.severity | default('unknown') | e }}
 <b>环境:</b> {{ labels.env | default('N/A') | e }}
 <b>项目:</b> {{ labels.project | default('N/A') | e }}
-<b>主机:</b> {{ labels.hostname | default(labels.instance | default('N/A')) | e }}
-<b>来源IP:</b> {{ labels.source_ip | default('N/A') | e }}
+<b>主机:</b> {{ show_value(labels.hostname | default(labels.instance | default('N/A'))) }}
+<b>来源IP:</b> {{ show_value(labels.source_ip | default('N/A')) }}
 
 {% if labels.user is defined %}
-<b>登录用户:</b> {{ labels.user | e }}
+<b>登录用户:</b> {{ show_value(labels.user) }}
 {% endif %}
 {% if labels.actor_user is defined %}
-<b>操作用户:</b> {{ labels.actor_user | e }}
+<b>操作用户:</b> {{ show_value(labels.actor_user) }}
 {% endif %}
 {% if labels.target_user is defined %}
-<b>目标用户:</b> {{ labels.target_user | e }}
+<b>目标用户:</b> {{ show_value(labels.target_user) }}
 {% endif %}
 {% if labels.method is defined %}
-<b>登录方式:</b> {{ labels.method | e }}
+<b>登录方式:</b> {{ show_value(labels.method) }}
 {% endif %}
 {% if labels.key_type is defined or labels.key_fingerprint is defined %}
-<b>公钥:</b> {{ labels.key_type | default('') | e }} {{ labels.key_fingerprint | default('') | e }}
+<b>公钥:</b> {{ show_value(labels.key_type | default('')) }} {{ show_value(labels.key_fingerprint | default('')) }}
 {% endif %}
 {% if labels.command is defined %}
-<b>命令:</b> <code>{{ labels.command | e }}</code>
+<b>命令:</b> <code>{{ show_value(labels.command) }}</code>
 {% endif %}
 
 {% if (annotations or {}).summary %}

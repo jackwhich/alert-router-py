@@ -173,6 +173,16 @@ def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "container",      # 容器名
             "build_number",   # Jenkins构建号
             "status",         # 状态码（如 Nginx status）
+            "hostname",       # SSH 登录主机名
+            "source_ip",      # SSH 登录来源 IP
+            "user",           # SSH 登录用户
+            "actor_user",     # SSH 提权前用户
+            "target_user",    # SSH 提权目标用户
+            "method",         # SSH 登录方式
+            "key_type",       # SSH 公钥类型
+            "key_fingerprint",# SSH 公钥指纹
+            "tool",           # SSH 提权工具
+            "command",        # SSH 提权命令
         ]
         
         # 共同 label：仅保留在所有条中取值相同的键（可收集的标签用下面的列表）
