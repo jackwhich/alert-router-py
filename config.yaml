@@ -198,6 +198,15 @@ channels:
     template: "prometheus_telegram_jenkins.html.j2"
     send_resolved: false
 
+  # SSH 登录审计告警渠道
+  prometheus_telegram_ssh_login:
+    type: telegram
+    enabled: true
+    image_enabled: false
+    bot_token: "xxxxx:xxxxx-xxxxxx"
+    chat_id: "-xxxxxx"
+    template: "prometheus_telegram_ssh_login.html.j2"
+
 # 路由：先识别来源（Grafana version 1 / Prometheus version 4），再按 _receiver、alertname、severity/级别 匹配；支持中文（如 "严重"、"灾难"）；无匹配则不发送
 routing:
   - match:
@@ -218,6 +227,11 @@ routing:
       _receiver: "prod_ebpay_jenkins_alarm"
       alertname: ".*Jenkins.*|.*jenkins.*"
     send_to: ["prometheus_telegram_jenkins"]
+
+  - match:
+      _source: "prometheus"
+      alertname: "主机.*SSH.*|SSH登录.*|主机Root提权会话"
+    send_to: ["prometheus_telegram_ssh_login"]
 
   - match:
       _receiver: "Withdrawal_Monitoring_Review_Manual_Review_Orders_Entering_Manual_Review"
