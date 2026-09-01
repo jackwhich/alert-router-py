@@ -129,13 +129,12 @@ defaults:
 # - 渠道：telegram、slack、tongsheng（发到哪里）
 # - 用途：default、critical、warning、jenkins 等
 
-# 通盛群组预警：下面这一段就是要填的凭证（所有 type: tongsheng 渠道共用）
+# 通盛群组预警：下面这一段是共用凭证（域名/token/机器人），群组 ID 写在每个渠道上
 # 管理员线下提供，不要把真实值提交进仓库
 tongsheng:
   base_url: "https://<接口域名>"          # 域名，不要带 /api/v1/alert/push
   token: "xxxxx"                         # X-Alert-Token
   robot_id: "1234567890"                 # 机器人 ID（bot id）
-  channel_id: "1000000001"               # 发送告警的群组 ID
   encrypt: true                          # 正式环境 true；测试环境若跳过解密则改 false
   aes_key: "xxxxxxxxxxxxxxxx"            # AES-128-CBC key，16 字节
   aes_iv: "yyyyyyyyyyyyyyyy"             # AES-128-CBC IV，16 字节
@@ -143,7 +142,7 @@ tongsheng:
   image_enabled: false                   # 通盛接口只推文本，没有发图能力；保持 false，改 true 也不会发图片
 
 channels:
-  # Prometheus 告警渠道（Telegram / 通盛成对；通盛凭证用顶部 tongsheng:，这里只开关）
+  # Prometheus 告警渠道（Telegram / 通盛成对；通盛群组 ID 写在各渠道 channel_id）
   prometheus_telegram_default:
     type: telegram
     enabled: true
@@ -156,6 +155,7 @@ channels:
     type: tongsheng
     enabled: true
     image_enabled: false
+    channel_id: "1000000001"             # 该告警发到的通盛群组 ID
     template: "prometheus_telegram.html.j2"
 
   prometheus_telegram_critical:
@@ -170,6 +170,7 @@ channels:
     type: tongsheng
     enabled: false
     image_enabled: false
+    channel_id: "1000000002"
     template: "prometheus_telegram.html.j2"
 
   prometheus_slack:
@@ -201,6 +202,7 @@ channels:
     type: tongsheng
     enabled: true
     image_enabled: false
+    channel_id: "1000000003"
     template: "grafana_telegram_manual_review.html.j2"
 
   grafana_telegram_critical:
@@ -233,6 +235,7 @@ channels:
     type: tongsheng
     enabled: true
     image_enabled: false
+    channel_id: "1000000004"
     template: "prometheus_telegram_jenkins.html.j2"
     send_resolved: false
 
@@ -249,6 +252,7 @@ channels:
     type: tongsheng
     enabled: true
     image_enabled: false
+    channel_id: "1000000005"
     template: "prometheus_telegram_ssh_login.html.j2"
 
 # 路由：先识别来源（Grafana version 1 / Prometheus version 4），再按 _receiver、alertname、severity/级别 匹配；支持中文（如 "严重"、"灾难"）；无匹配则不发送

@@ -19,7 +19,6 @@ _TONGSHENG_INHERIT_KEYS = (
     "base_url",
     "token",
     "robot_id",
-    "channel_id",
     "encrypt",
     "aes_key",
     "aes_iv",
