@@ -129,16 +129,16 @@ defaults:
 # - 渠道：telegram、slack、tongsheng（发到哪里）
 # - 用途：default、critical、warning、jenkins 等
 
-# 通盛群组预警公共凭证（渠道 type=tongsheng 时继承；渠道可覆盖 channel_id）
-# token / aes_key / aes_iv 由管理员线下提供，不要把真实值提交进仓库
+# 通盛群组预警：下面这一段就是要填的凭证（所有 type: tongsheng 渠道共用）
+# 管理员线下提供，不要把真实值提交进仓库
 tongsheng:
-  base_url: "https://<接口域名>"
-  token: "xxxxx"
-  robot_id: "1234567890"
-  channel_id: "1000000001"
-  encrypt: true
-  aes_key: "xxxxxxxxxxxxxxxx"
-  aes_iv: "yyyyyyyyyyyyyyyy"
+  base_url: "https://<接口域名>"          # 域名，不要带 /api/v1/alert/push
+  token: "xxxxx"                         # X-Alert-Token
+  robot_id: "1234567890"                 # 机器人 ID（bot id）
+  channel_id: "1000000001"               # 发送告警的群组 ID
+  encrypt: true                          # 正式环境 true；测试环境若跳过解密则改 false
+  aes_key: "xxxxxxxxxxxxxxxx"            # AES-128-CBC key，16 字节
+  aes_iv: "yyyyyyyyyyyyyyyy"             # AES-128-CBC IV，16 字节
 
 channels:
   # Prometheus 告警渠道
@@ -218,7 +218,8 @@ channels:
     chat_id: "-xxxxxx"
     template: "prometheus_telegram_ssh_login.html.j2"
 
-  # 通盛：与对应 Telegram 渠道并行，公共凭证见顶层 tongsheng
+  # 通盛：凭证填上面的 tongsheng: 段（域名/token/bot id/群组 id/aes key/iv）
+  # 某个渠道要发到别的群时，在该渠道下加 channel_id 即可覆盖
   prometheus_tongsheng_default:
     type: tongsheng
     enabled: true
