@@ -14,6 +14,17 @@ from .models import Channel
 # logger 会在配置加载完成后由 app.py 初始化
 logger = None
 
+# 通盛渠道可从顶层 tongsheng 继承的字段（渠道级非空值优先）
+_TONGSHENG_INHERIT_KEYS = (
+    "base_url",
+    "token",
+    "robot_id",
+    "channel_id",
+    "encrypt",
+    "aes_key",
+    "aes_iv",
+)
+
 
 def _config_path() -> Path:
     """解析 config.yaml 路径：优先环境变量 CONFIG_FILE，否则为项目根目录下的 config.yaml"""
@@ -46,6 +57,21 @@ def _validate_logging_config(raw: Dict) -> None:
     missing = [field for field in required_fields if field not in logging_cfg]
     if missing:
         raise ValueError(f"config.yaml 中 logging 缺少必要字段: {', '.join(missing)}")
+
+
+def _merge_tongsheng_defaults(channel_data: Dict, tongsheng_defaults: Dict) -> None:
+    """把顶层 tongsheng 缺省值填进渠道；渠道上已有的非空值不覆盖。"""
+    if not tongsheng_defaults:
+        return
+    for key in _TONGSHENG_INHERIT_KEYS:
+        if key not in tongsheng_defaults:
+            continue
+        current = channel_data.get(key)
+        if key == "encrypt":
+            if current is None:
+                channel_data[key] = tongsheng_defaults[key]
+        elif current in (None, ""):
+            channel_data[key] = tongsheng_defaults[key]
 
 
 def load_config() -> Tuple[Dict, Dict[str, Channel]]:
@@ -89,6 +115,7 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
     # 获取全局代理配置和开关
     global_proxy = raw.get("proxy", None)
     global_proxy_enabled = raw.get("proxy_enabled", True)  # 默认启用
+    tongsheng_defaults = raw.get("tongsheng") if isinstance(raw.get("tongsheng"), dict) else {}
     
     enabled_count = 0
     for k, v in raw["channels"].items():
@@ -125,6 +152,8 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
         # 创建 channel_data，排除已单独处理的字段，避免重复传递
         channel_data = {k: v for k, v in v.items() if k not in ["enabled", "proxy", "proxy_enabled", "send_resolved"]}
         channel_data.update({"proxy": proxy, "proxy_enabled": proxy_enabled, "send_resolved": send_resolved})
+        if channel_data.get("type") == "tongsheng":
+            _merge_tongsheng_defaults(channel_data, tongsheng_defaults)
         channels[k] = Channel(name=k, enabled=enabled, **channel_data)
         if enabled:
             enabled_count += 1

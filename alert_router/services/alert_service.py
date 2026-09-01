@@ -11,7 +11,7 @@ from requests.exceptions import HTTPError, RequestException, Timeout, Connection
 from ..routing.grafana_dedup import should_skip_grafana_duplicate
 from ..routing.jenkins_dedup import should_skip_jenkins_firing
 from ..routing.routing import route
-from ..senders.senders import send_telegram, send_webhook
+from ..senders.senders import send_telegram, send_webhook, send_tongsheng
 from ..templates.template_renderer import render
 from .image_service import ImageService
 from .channel_filter import ChannelFilter
@@ -344,6 +344,8 @@ class AlertService:
                             raise
                 else:
                     send_telegram(channel, body)
+            elif channel.type == "tongsheng":
+                send_tongsheng(channel, body)
             else:
                 send_webhook(channel, body)
 

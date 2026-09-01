@@ -21,7 +21,7 @@ from .routing import route, match, should_skip_jenkins_firing
 from .templates import render
 
 # 发送器
-from .senders import send_telegram, send_webhook
+from .senders import send_telegram, send_webhook, send_tongsheng
 
 # 服务层（新增）
 from .services import AlertService, ImageService, ChannelFilter
@@ -51,6 +51,7 @@ __all__ = [
     # 发送器
     "send_telegram",
     "send_webhook",
+    "send_tongsheng",
     # 服务层
     "AlertService",
     "ImageService",

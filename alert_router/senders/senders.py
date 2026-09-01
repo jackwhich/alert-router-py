@@ -5,9 +5,14 @@
 - 使用 HTTP 连接池复用连接，减少连接建立开销
 - 支持会话级别的代理配置
 """
+import base64
+import html
 import json
 import logging
-from typing import Optional, Dict
+import re
+import time
+import uuid
+from typing import Optional, Dict, Tuple
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -28,7 +33,13 @@ TIMEOUTS = {
     "telegram_photo": 15,
     "telegram_text": 10,
     "webhook": 10,
+    "tongsheng": 10,
 }
+
+_TONGSHENG_PUSH_PATH = "/api/v1/alert/push"
+_TONGSHENG_MAX_ATTEMPTS = 3
+_TONGSHENG_RATE_LIMIT_WAIT = 1
+_HTML_TAG_RE = re.compile(r"</?(?:b|i|u|em|strong|code|pre|span|p|div|a)(?:\s[^>]*)?>", re.IGNORECASE)
 
 # HTTP 连接池配置
 # 使用连接池复用连接，提高性能
@@ -281,6 +292,174 @@ def send_webhook(ch: Channel, body: str):
     except requests.exceptions.RequestException as e:
         _log_webhook_error(ch.name, e)
         raise
+
+
+def _html_to_plain_text(text: str) -> str:
+    """把 Telegram HTML 模板转成通盛纯文本。"""
+    text = text or ""
+    text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    text = _HTML_TAG_RE.sub("", text)
+    text = html.unescape(text)
+    return text.strip()
+
+
+def _to_aes16_bytes(value: Optional[str], field_name: str) -> bytes:
+    """解析 16 字节 AES key/IV：UTF-8 16 字节，或 32 位 hex。不把原值写入异常信息。"""
+    if not value:
+        raise requests.exceptions.RequestException(f"通盛 {field_name} 未配置")
+    raw = value.encode("utf-8")
+    if len(raw) == 16:
+        return raw
+    try:
+        decoded = bytes.fromhex(value.strip())
+    except ValueError as exc:
+        raise requests.exceptions.RequestException(
+            f"通盛 {field_name} 必须为 16 字节（或 32 位 hex）"
+        ) from exc
+    if len(decoded) != 16:
+        raise requests.exceptions.RequestException(f"通盛 {field_name} 必须为 16 字节（或 32 位 hex）")
+    return decoded
+
+
+def _aes128_cbc_encrypt(plaintext: str, key: str, iv: str) -> str:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives.padding import PKCS7
+
+    key_bytes = _to_aes16_bytes(key, "aes_key")
+    iv_bytes = _to_aes16_bytes(iv, "aes_iv")
+    padder = PKCS7(128).padder()
+    padded = padder.update(plaintext.encode("utf-8")) + padder.finalize()
+    encryptor = Cipher(algorithms.AES(key_bytes), modes.CBC(iv_bytes)).encryptor()
+    ciphertext = encryptor.update(padded) + encryptor.finalize()
+    return base64.b64encode(ciphertext).decode("ascii")
+
+
+def _build_tongsheng_envelope(ch: Channel, plain: Dict) -> Dict:
+    encrypt = True if ch.encrypt is None else bool(ch.encrypt)
+    if encrypt:
+        ciphertext = _aes128_cbc_encrypt(
+            json.dumps(plain, ensure_ascii=False),
+            ch.aes_key or "",
+            ch.aes_iv or "",
+        )
+        return {"data": ciphertext}
+    return {"data": plain}
+
+
+def _parse_tongsheng_response(response: Optional[requests.Response]) -> Tuple[str, str]:
+    if response is None:
+        return "", "无响应"
+    try:
+        body = response.json()
+    except (ValueError, json.JSONDecodeError):
+        text = (response.text or "").strip()
+        return "", text[:200] or f"HTTP {response.status_code}"
+    if not isinstance(body, dict):
+        return "", str(body)[:200]
+    code = body.get("code", "")
+    msg = body.get("msg", "")
+    return str(code), str(msg) if msg is not None else ""
+
+
+def send_tongsheng(ch: Channel, text: str):
+    """
+    发送通盛群组预警。
+
+    只认响应 JSON 的 code/msg；10179 等待 1 秒后用同一 msg_no 重试。
+    日志不输出 token、aes_key、aes_iv。
+    """
+    if not ch.base_url:
+        raise requests.exceptions.RequestException(f"通盛渠道 [{ch.name}] 未配置 base_url")
+    if not ch.token:
+        raise requests.exceptions.RequestException(f"通盛渠道 [{ch.name}] 未配置 token")
+    if not ch.robot_id:
+        raise requests.exceptions.RequestException(f"通盛渠道 [{ch.name}] 未配置 robot_id")
+    if not ch.channel_id:
+        raise requests.exceptions.RequestException(f"通盛渠道 [{ch.name}] 未配置 channel_id")
+
+    content = _html_to_plain_text(text)
+    if not content:
+        content = " "
+
+    msg_no = uuid.uuid4().hex
+    plain = {
+        "robot_id": str(ch.robot_id),
+        "messages": [
+            {
+                "channel_id": str(ch.channel_id),
+                "content": content,
+                "msg_no": msg_no,
+            }
+        ],
+    }
+    envelope = _build_tongsheng_envelope(ch, plain)
+    url = ch.base_url.rstrip("/") + _TONGSHENG_PUSH_PATH
+    headers = {
+        "Content-Type": "application/json",
+        "X-Alert-Token": ch.token,
+    }
+    session = _get_session(proxy=ch.proxy)
+
+    logger.info(
+        f"[通盛] 渠道 [{ch.name}] 请求: channel_id={ch.channel_id}, "
+        f"encrypt={True if ch.encrypt is None else bool(ch.encrypt)}, msg_no={msg_no}"
+    )
+
+    last_code = ""
+    last_msg = ""
+    last_response = None
+    for attempt in range(1, _TONGSHENG_MAX_ATTEMPTS + 1):
+        try:
+            response = request_with_metrics(
+                session,
+                "POST",
+                url,
+                target="tongsheng",
+                json=envelope,
+                headers=headers,
+                timeout=TIMEOUTS["tongsheng"],
+            )
+            last_response = response
+            last_code, last_msg = _parse_tongsheng_response(response)
+        except requests.exceptions.HTTPError as e:
+            last_response = e.response
+            last_code, last_msg = _parse_tongsheng_response(e.response)
+            if last_code != "10179":
+                logger.error(
+                    f"发送通盛消息失败 (渠道: {ch.name}): "
+                    f"code={last_code or 'http_error'}, msg={last_msg or e}"
+                )
+                raise
+        except requests.exceptions.RequestException as e:
+            logger.error(f"发送通盛消息失败 (渠道: {ch.name}): {e}")
+            raise
+
+        if last_code == "200":
+            logger.info(f"[通盛] 渠道 [{ch.name}] 发送成功, code={last_code}, msg={last_msg}")
+            if logger.isEnabledFor(logging.DEBUG) and last_response is not None:
+                try:
+                    logger.debug(
+                        "通盛响应内容",
+                        extra={"tongsheng_response": last_response.json()},
+                    )
+                except (ValueError, json.JSONDecodeError):
+                    logger.debug(
+                        "通盛响应内容（非 JSON）",
+                        extra={"tongsheng_response_text": last_response.text},
+                    )
+            return last_response
+
+        if last_code == "10179" and attempt < _TONGSHENG_MAX_ATTEMPTS:
+            logger.warning(
+                f"[通盛] 渠道 [{ch.name}] 频率限制 (code=10179)，"
+                f"{_TONGSHENG_RATE_LIMIT_WAIT} 秒后重试 ({attempt}/{_TONGSHENG_MAX_ATTEMPTS})"
+            )
+            time.sleep(_TONGSHENG_RATE_LIMIT_WAIT)
+            continue
+
+        raise requests.exceptions.RequestException(
+            f"通盛推送失败 (渠道: {ch.name}): code={last_code}, msg={last_msg}"
+        )
 
 
 def _log_webhook_request(channel_name: str, url: str, body: str):

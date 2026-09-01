@@ -126,8 +126,19 @@ defaults:
 
 # 渠道配置说明：命名规范 = 来源_渠道_用途
 # - 来源：prometheus、grafana（谁发的告警）
-# - 渠道：telegram、slack（发到哪里）
+# - 渠道：telegram、slack、tongsheng（发到哪里）
 # - 用途：default、critical、warning、jenkins 等
+
+# 通盛群组预警公共凭证（渠道 type=tongsheng 时继承；渠道可覆盖 channel_id）
+# token / aes_key / aes_iv 由管理员线下提供，不要把真实值提交进仓库
+tongsheng:
+  base_url: "https://<接口域名>"
+  token: "xxxxx"
+  robot_id: "1234567890"
+  channel_id: "1000000001"
+  encrypt: true
+  aes_key: "xxxxxxxxxxxxxxxx"
+  aes_iv: "yyyyyyyyyyyyyyyy"
 
 channels:
   # Prometheus 告警渠道
@@ -207,17 +218,54 @@ channels:
     chat_id: "-xxxxxx"
     template: "prometheus_telegram_ssh_login.html.j2"
 
+  # 通盛：与对应 Telegram 渠道并行，公共凭证见顶层 tongsheng
+  prometheus_tongsheng_default:
+    type: tongsheng
+    enabled: true
+    image_enabled: false
+    proxy_enabled: false
+    template: "prometheus_telegram.html.j2"
+
+  prometheus_tongsheng_critical:
+    type: tongsheng
+    enabled: false
+    image_enabled: false
+    proxy_enabled: false
+    template: "prometheus_telegram.html.j2"
+
+  prometheus_tongsheng_jenkins:
+    type: tongsheng
+    enabled: true
+    image_enabled: false
+    proxy_enabled: false
+    template: "prometheus_telegram_jenkins.html.j2"
+    send_resolved: false
+
+  prometheus_tongsheng_ssh_login:
+    type: tongsheng
+    enabled: true
+    image_enabled: false
+    proxy_enabled: false
+    template: "prometheus_telegram_ssh_login.html.j2"
+
+  grafana_risk_withdrawal_order_tongsheng_default:
+    type: tongsheng
+    enabled: true
+    image_enabled: false
+    proxy_enabled: false
+    template: "grafana_telegram_manual_review.html.j2"
+
 # 路由：先识别来源（Grafana version 1 / Prometheus version 4），再按 _receiver、alertname、severity/级别 匹配；支持中文（如 "严重"、"灾难"）；无匹配则不发送
 routing:
   - match:
       _receiver: "Prometheus"
-    send_to: ["prometheus_telegram_default"]
+    send_to: ["prometheus_telegram_default", "prometheus_tongsheng_default"]
 
   - match:
       _receiver: "Prometheus"
       alertname: "^(?!Jenkins|jenkins).*"
       severity: "critical|灾难"
-    send_to: ["prometheus_telegram_critical"]
+    send_to: ["prometheus_telegram_critical", "prometheus_tongsheng_critical"]
 
   - match:
       _receiver: "prod-ebpay"
@@ -226,12 +274,14 @@ routing:
   - match:
       _receiver: "prod_ebpay_jenkins_alarm"
       alertname: ".*Jenkins.*|.*jenkins.*"
-    send_to: ["prometheus_telegram_jenkins"]
+    send_to: ["prometheus_telegram_jenkins", "prometheus_tongsheng_jenkins"]
 
   - match:
       _receiver: "ssh_login_alarm"
-    send_to: ["prometheus_telegram_ssh_login"]
+    send_to: ["prometheus_telegram_ssh_login", "prometheus_tongsheng_ssh_login"]
 
   - match:
       _receiver: "Withdrawal_Monitoring_Review_Manual_Review_Orders_Entering_Manual_Review"
-    send_to: ["grafana_risk_withdrawal_order_telegram_default"]
+    send_to:
+      - "grafana_risk_withdrawal_order_telegram_default"
+      - "grafana_risk_withdrawal_order_tongsheng_default"

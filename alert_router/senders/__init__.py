@@ -1,9 +1,10 @@
 """
 消息发送模块
 """
-from .senders import send_telegram, send_webhook
+from .senders import send_telegram, send_webhook, send_tongsheng
 
 __all__ = [
     "send_telegram",
     "send_webhook",
+    "send_tongsheng",
 ]

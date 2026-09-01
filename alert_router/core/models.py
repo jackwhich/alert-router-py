@@ -19,3 +19,11 @@ class Channel:
     proxy_enabled: bool = True  # 开关：是否启用代理（此渠道）
     send_resolved: bool = True  # 是否发送 resolved 状态的告警（默认发送）
     image_enabled: bool = False  # 是否对该渠道启用 Prometheus 趋势图发送（仅 Telegram）
+    # 通盛群组预警（type=tongsheng）；缺省值由 config.yaml 顶层 tongsheng 合并而来
+    base_url: Optional[str] = None
+    token: Optional[str] = None
+    robot_id: Optional[str] = None
+    channel_id: Optional[str] = None
+    encrypt: Optional[bool] = None
+    aes_key: Optional[str] = None
+    aes_iv: Optional[str] = None
