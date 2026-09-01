@@ -23,7 +23,10 @@ _TONGSHENG_INHERIT_KEYS = (
     "encrypt",
     "aes_key",
     "aes_iv",
+    "image_enabled",
 )
+
+_TONGSHENG_BOOL_KEYS = frozenset({"encrypt", "image_enabled"})
 
 
 def _config_path() -> Path:
@@ -67,7 +70,7 @@ def _merge_tongsheng_defaults(channel_data: Dict, tongsheng_defaults: Dict) -> N
         if key not in tongsheng_defaults:
             continue
         current = channel_data.get(key)
-        if key == "encrypt":
+        if key in _TONGSHENG_BOOL_KEYS:
             if current is None:
                 channel_data[key] = tongsheng_defaults[key]
         elif current in (None, ""):
@@ -122,8 +125,16 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
         # enabled 默认为 True（如果未配置）
         enabled = v.get("enabled", True)
         
-        # 代理开关：优先使用渠道级别的，如果没有则使用全局开关
-        proxy_enabled = v.get("proxy_enabled", global_proxy_enabled)
+        # 代理开关：通盛只用 tongsheng.proxy_enabled（渠道可覆盖），true 才走代理；其它渠道仍跟全局开关
+        if v.get("type") == "tongsheng":
+            if "proxy_enabled" in v:
+                proxy_enabled = v.get("proxy_enabled") is True
+            elif "proxy_enabled" in tongsheng_defaults:
+                proxy_enabled = tongsheng_defaults.get("proxy_enabled") is True
+            else:
+                proxy_enabled = False
+        else:
+            proxy_enabled = v.get("proxy_enabled", global_proxy_enabled)
         
         # 代理配置：优先使用渠道级别的，如果没有则使用全局代理
         proxy = v.get("proxy", global_proxy)
