@@ -143,7 +143,7 @@ tongsheng:
   image_enabled: false                   # 通盛接口只推文本，没有发图能力；保持 false，改 true 也不会发图片
 
 channels:
-  # Prometheus 告警渠道
+  # Prometheus 告警渠道（Telegram / 通盛成对；通盛凭证用顶部 tongsheng:，这里只开关）
   prometheus_telegram_default:
     type: telegram
     enabled: true
@@ -152,12 +152,24 @@ channels:
     chat_id: "-xxxxxx"
     template: "prometheus_telegram.html.j2"
 
+  prometheus_tongsheng_default:
+    type: tongsheng
+    enabled: true
+    image_enabled: false
+    template: "prometheus_telegram.html.j2"
+
   prometheus_telegram_critical:
     type: telegram
     enabled: false
     image_enabled: false
     bot_token: "123456:AAxxxx"
     chat_id: "-xxxxx"
+    template: "prometheus_telegram.html.j2"
+
+  prometheus_tongsheng_critical:
+    type: tongsheng
+    enabled: false
+    image_enabled: false
     template: "prometheus_telegram.html.j2"
 
   prometheus_slack:
@@ -183,6 +195,12 @@ channels:
     image_enabled: false
     bot_token: "xxxxx:AAFqy849KL-YdNykyE7KcPvYpoCRpNYH4Mc"
     chat_id: "-xxx"
+    template: "grafana_telegram_manual_review.html.j2"
+
+  grafana_risk_withdrawal_order_tongsheng_default:
+    type: tongsheng
+    enabled: true
+    image_enabled: false
     template: "grafana_telegram_manual_review.html.j2"
 
   grafana_telegram_critical:
@@ -211,6 +229,13 @@ channels:
     template: "prometheus_telegram_jenkins.html.j2"
     send_resolved: false
 
+  prometheus_tongsheng_jenkins:
+    type: tongsheng
+    enabled: true
+    image_enabled: false
+    template: "prometheus_telegram_jenkins.html.j2"
+    send_resolved: false
+
   # SSH 登录审计告警渠道
   prometheus_telegram_ssh_login:
     type: telegram
@@ -220,32 +245,11 @@ channels:
     chat_id: "-xxxxxx"
     template: "prometheus_telegram_ssh_login.html.j2"
 
-  # 通盛：凭证和代理开关填上面的 tongsheng: 段；某个渠道要发到别的群时加 channel_id 覆盖
-  prometheus_tongsheng_default:
-    type: tongsheng
-    enabled: true
-    template: "prometheus_telegram.html.j2"
-
-  prometheus_tongsheng_critical:
-    type: tongsheng
-    enabled: false
-    template: "prometheus_telegram.html.j2"
-
-  prometheus_tongsheng_jenkins:
-    type: tongsheng
-    enabled: true
-    template: "prometheus_telegram_jenkins.html.j2"
-    send_resolved: false
-
   prometheus_tongsheng_ssh_login:
     type: tongsheng
     enabled: true
+    image_enabled: false
     template: "prometheus_telegram_ssh_login.html.j2"
-
-  grafana_risk_withdrawal_order_tongsheng_default:
-    type: tongsheng
-    enabled: true
-    template: "grafana_telegram_manual_review.html.j2"
 
 # 路由：先识别来源（Grafana version 1 / Prometheus version 4），再按 _receiver、alertname、severity/级别 匹配；支持中文（如 "严重"、"灾难"）；无匹配则不发送
 routing:
