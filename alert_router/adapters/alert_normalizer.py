@@ -24,21 +24,26 @@ class WebhookFormat(Enum):
 
 def identify_data_source(payload: Dict[str, Any]) -> WebhookFormat:
     """
-    只判断是哪个软件发来的：version "1" = Grafana，version "4" = Prometheus。
-    需含 alerts 数组才视为有效 webhook；其余交给路由按 receiver/alertname/severity 匹配。
+    判断 webhook 来源。
+
+    - Grafana：orgId、version == "1"，或带 state/title 的 Unified Alerting 形态
+    - Prometheus：version == "4"，或含 groupKey 且无 Grafana 特征
+    - 单条告警：无 alerts 数组，但有 labels/annotations
     """
     if not isinstance(payload, dict):
         return WebhookFormat.UNKNOWN
-    version = payload.get("version")
-    has_alerts = "alerts" in payload and isinstance(payload.get("alerts"), list)
+    has_alerts = isinstance(payload.get("alerts"), list)
     if not has_alerts:
         if "labels" in payload or "annotations" in payload:
             return WebhookFormat.SINGLE_ALERT
         return WebhookFormat.UNKNOWN
-    if version == "1":
+    version = payload.get("version")
+    if "orgId" in payload or version == "1":
         return WebhookFormat.GRAFANA_UNIFIED_ALERTING
-    if version == "4":
+    if version == "4" or "groupKey" in payload:
         return WebhookFormat.PROMETHEUS_ALERTMANAGER
+    if "state" in payload or "title" in payload:
+        return WebhookFormat.GRAFANA_UNIFIED_ALERTING
     return WebhookFormat.UNKNOWN
 
 

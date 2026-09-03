@@ -255,12 +255,9 @@ channels:
     channel_id: "1000000005"
     template: "prometheus_telegram_ssh_login.html.j2"
 
-# 路由：先识别来源（Grafana version 1 / Prometheus version 4），再按 _receiver、alertname、severity/级别 匹配；支持中文（如 "严重"、"灾难"）；无匹配则不发送
+# 路由：先识别来源（Grafana version 1 / Prometheus version 4），再按 _receiver、alertname、severity/级别 匹配。
+# 按从上到下 first-match：更具体的规则必须写在前面，命中后不再叠加后续规则。
 routing:
-  - match:
-      _receiver: "Prometheus"
-    send_to: ["prometheus_telegram_default", "prometheus_tongsheng_default"]
-
   - match:
       _receiver: "Prometheus"
       alertname: "^(?!Jenkins|jenkins).*"
@@ -285,3 +282,7 @@ routing:
     send_to:
       - "grafana_risk_withdrawal_order_telegram_default"
       - "grafana_risk_withdrawal_order_tongsheng_default"
+
+  - match:
+      _receiver: "Prometheus"
+    send_to: ["prometheus_telegram_default", "prometheus_tongsheng_default"]

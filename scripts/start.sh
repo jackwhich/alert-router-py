@@ -7,11 +7,12 @@ set -e
 
 # 配置变量
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_NAME="alert-router"
 PID_FILE="${SCRIPT_DIR}/${PROJECT_NAME}.pid"
-LOG_FILE="${SCRIPT_DIR}/logs/${PROJECT_NAME}.log"
+LOG_FILE="${PROJECT_ROOT}/logs/${PROJECT_NAME}.log"
 PYTHON_CMD="${PYTHON_CMD:-python3.9}"  # 默认使用 python3.9
-CONFIG_FILE="${CONFIG_FILE:-${SCRIPT_DIR}/config.yaml}"  # 支持外部指定配置文件路径
+CONFIG_FILE="${CONFIG_FILE:-${PROJECT_ROOT}/config.yaml}"  # 支持外部指定配置文件路径
 
 # 工作进程数和超时时间（可以通过环境变量覆盖）
 WORKERS="${WORKERS:-4}"
@@ -73,7 +74,7 @@ check_python() {
 check_dependencies() {
     if ! $PYTHON_CMD -c "import fastapi" 2>/dev/null; then
         log_warn "正在安装依赖..."
-        ${PYTHON_CMD} -m pip install -r requirements.txt
+        ${PYTHON_CMD} -m pip install -r "${SCRIPT_DIR}/requirements.txt"
     fi
 }
 
@@ -121,8 +122,8 @@ start_service() {
     mkdir -p "$(dirname "$LOG_FILE")"
     
     # 启动服务（后台运行）
-    # 直接运行 app.py，它会自动从 config.yaml 读取配置
-    cd "$SCRIPT_DIR"
+    # 在仓库根目录运行 app.py，默认读取根目录 config.yaml
+    cd "$PROJECT_ROOT"
     WORKERS="$WORKERS" TIMEOUT="$TIMEOUT" CONFIG_FILE="$CONFIG_FILE" nohup $PYTHON_CMD app.py \
         >> "$LOG_FILE" 2>&1 &
     

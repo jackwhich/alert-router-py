@@ -79,21 +79,11 @@ def match(labels: Dict[str, str], cond: Dict[str, str]) -> bool:
 
 def route(labels: Dict[str, str], config: Dict) -> List[str]:
     """
-    路由告警到渠道列表
-    支持多个规则叠加：默认渠道 + 匹配的特定规则渠道
-    
-    Args:
-        labels: 告警标签字典
-        config: 配置字典（包含 routing 规则）
-    
-    Returns:
-        List[str]: 渠道名称列表（去重）
+    路由告警到渠道列表。
+    按配置顺序 first-match：命中第一条 match 规则即返回其 send_to，不再叠加后续规则。
+    所有 match 都未命中时，才使用第一条 default 规则。
     """
-    channels = set()
     default_channels = None
-    matched_rules = []
-    
-    # 获取路由规则列表，如果不存在则返回空列表
     routing_rules = config.get("routing", [])
     if not routing_rules:
         logger.error("配置中未找到 routing 规则，告警将无法发送")
@@ -107,7 +97,6 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
         len(routing_rules),
     )
 
-    # 先收集所有匹配的规则和默认规则
     for idx, r in enumerate(routing_rules):
         if "match" in r:
             matched = match(labels, r["match"])
@@ -120,40 +109,29 @@ def route(labels: Dict[str, str], config: Dict) -> List[str]:
                 )
             if matched:
                 rule_channels = r.get("send_to", [])
-                channels.update(rule_channels)
-                matched_rules.append(
-                    {
-                        "rule_index": idx,
-                        "match": r["match"],
-                        "send_to": rule_channels,
-                    }
+                logger.info(
+                    "命中规则[%d]: match=%s -> send_to=%s",
+                    idx,
+                    r["match"],
+                    rule_channels,
                 )
+                final_channels = sorted(list(dict.fromkeys(rule_channels)))
+                logger.info("路由结果渠道: %s", final_channels)
+                return final_channels
         elif r.get("default"):
-            # 默认规则：仅保留第一个，避免多条 default 覆盖
             if default_channels is None:
-                default_channels = r["send_to"]
+                default_channels = r.get("send_to", [])
             else:
                 global _DEFAULT_RULE_WARNED
                 if not _DEFAULT_RULE_WARNED:
                     logger.warning("发现多个 default 规则，仅使用第一个默认规则")
                     _DEFAULT_RULE_WARNED = True
-    
-    if not channels:
-        if default_channels:
-            channels.update(default_channels)
-            logger.info("未命中特定规则，使用默认规则渠道: %s", default_channels)
-        else:
-            logger.warning("未找到匹配规则且无默认规则，告警将无法发送")
 
-    final_channels = sorted(list(channels))
-    if matched_rules:
-        logger.info("命中规则数=%d", len(matched_rules))
-        for item in matched_rules:
-            logger.info(
-                "命中规则[%d]: match=%s -> send_to=%s",
-                item["rule_index"],
-                item["match"],
-                item["send_to"],
-            )
-    logger.info("路由结果渠道: %s", final_channels)
-    return final_channels
+    if default_channels:
+        logger.info("未命中特定规则，使用默认规则渠道: %s", default_channels)
+        final_channels = sorted(list(dict.fromkeys(default_channels)))
+        logger.info("路由结果渠道: %s", final_channels)
+        return final_channels
+
+    logger.warning("未找到匹配规则且无默认规则，告警将无法发送")
+    return []

@@ -6,6 +6,7 @@
 from typing import Dict, List
 
 from ..core.models import Channel
+from ..routing.ttl_dedup import is_resolved_status
 
 
 class ChannelFilter:
@@ -77,4 +78,4 @@ class ChannelFilter:
     @staticmethod
     def _should_skip_by_status(channel: Channel, alert_status: str) -> bool:
         """检查是否应该跳过该渠道（基于告警状态）"""
-        return alert_status == "resolved" and not channel.send_resolved
+        return is_resolved_status(alert_status) and not channel.send_resolved

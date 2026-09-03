@@ -7,15 +7,13 @@ Grafana 告警去重模块
 """
 import hashlib
 import logging
-import time
-from threading import RLock
-from typing import Dict, Optional
+from typing import Optional
+
+from .ttl_dedup import TtlDedupCache
 
 logger = logging.getLogger("alert-router")
 
-# 进程内 Grafana 去重缓存（key -> 过期时间戳）
-_GRAFANA_DEDUP_CACHE: Dict[str, float] = {}
-_GRAFANA_DEDUP_LOCK = RLock()
+_CACHE = TtlDedupCache("Grafana")
 
 
 def _build_dedup_key(alert: dict, alert_status: str) -> Optional[str]:
@@ -31,7 +29,6 @@ def _build_dedup_key(alert: dict, alert_status: str) -> Optional[str]:
     alertname = labels.get("alertname", "")
     if not alertname:
         return None
-    # 用一组能区分“同一条告警”的 label 做哈希，避免不同告警被误去重
     parts = [alertname, alert_status]
     for k in ("grafana_folder", "nginx-alert", "service_name.keyword", "uri.keyword", "status"):
         if k in labels:
@@ -52,40 +49,11 @@ def should_skip_grafana_duplicate(
     - resolved 后若 clear_on_resolved=true 则清理 key，下次 firing 会再发
     """
     dedup_cfg = (config or {}).get("grafana_dedup", {}) or {}
-    if not dedup_cfg.get("enabled", True):
-        return False
-
-    key = _build_dedup_key(alert, alert_status)
-    if not key:
-        return False
-
-    ttl_seconds = int(dedup_cfg.get("ttl_seconds", 90))
-    clear_on_resolved = bool(dedup_cfg.get("clear_on_resolved", True))
-    now = time.time()
-
-    with _GRAFANA_DEDUP_LOCK:
-        expired_keys = [k for k, exp in _GRAFANA_DEDUP_CACHE.items() if exp <= now]
-        if expired_keys:
-            for k in expired_keys:
-                _GRAFANA_DEDUP_CACHE.pop(k, None)
-            logger.debug(f"Grafana 去重缓存清理了 {len(expired_keys)} 个过期 key")
-
-        if alert_status in ("resolved", "ok"):
-            if clear_on_resolved:
-                if key in _GRAFANA_DEDUP_CACHE:
-                    _GRAFANA_DEDUP_CACHE.pop(key, None)
-                    logger.debug("Grafana 去重：resolved，已清理去重缓存 key: %s", key)
-            return False
-
-        expires_at = _GRAFANA_DEDUP_CACHE.get(key)
-        if expires_at and expires_at > now:
-            logger.info(
-                "Grafana 去重：同一条告警在窗口内已发送过，跳过 (key: %s, 剩余: %ds)",
-                key,
-                int(expires_at - now),
-            )
-            return True
-
-        _GRAFANA_DEDUP_CACHE[key] = now + max(1, ttl_seconds)
-        logger.debug("Grafana 去重：首次发送，已记录 key: %s (TTL: %ds)", key, ttl_seconds)
-        return False
+    return _CACHE.should_skip(
+        _build_dedup_key(alert, alert_status),
+        alert_status,
+        enabled=bool(dedup_cfg.get("enabled", True)),
+        ttl_seconds=int(dedup_cfg.get("ttl_seconds", 90)),
+        clear_on_resolved=bool(dedup_cfg.get("clear_on_resolved", True)),
+        skip_non_firing=False,
+    )

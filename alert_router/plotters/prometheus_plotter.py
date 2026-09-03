@@ -10,18 +10,13 @@ Prometheus 趋势图生成模块
 """
 from __future__ import annotations
 
-import platform
 import re
-import subprocess
 import warnings
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
-import matplotlib
-import matplotlib.dates as mdates
 import requests
 
 from ..core.logging_config import get_logger
@@ -32,147 +27,29 @@ from ..core.metrics import (
     PrometheusRequestsByDatasourceTotal,
     PrometheusRequestsTotal,
 )
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import font_manager as fm  # noqa: E402
+from .base import (
+    DEFAULT_LEGEND_LABEL_WHITELIST,
+    PLOTLY_AVAILABLE,
+    build_series_label,
+    format_alert_time,
+    get_cjk_font_family,
+    legend_line_with_alert_value,
+    parse_time_series_data,
+    render_matplotlib_png,
+)
 
 logger = get_logger("alert-router")
 
-# 各平台优先使用的中文字体（按顺序尝试，第一个可用即用）
-_CJK_FONT_CANDIDATES: Dict[str, List[str]] = {
-    "Darwin": ["PingFang SC", "STHeiti", "Arial Unicode MS", "Heiti SC", "Arial"],
-    "Linux": [
-        "WenQuanYi Micro Hei",
-        "WenQuanYi Zen Hei",
-        "Noto Sans CJK SC",
-        "Noto Sans SC",
-        "Droid Sans Fallback",
-        "AR PL UMing CN",
-        "DejaVu Sans",
-    ],
-    "Windows": ["Microsoft YaHei", "SimHei", "DengXian", "Arial"],
-}
-
-# 缓存检测到的中文字体名，供 matplotlib 与 Plotly 共用
-_cjk_font_family_cache: Optional[str] = None
-
-
-def _get_cjk_font_family() -> Optional[str]:
-    """返回当前系统可用的中文字体 family 名称（供 matplotlib / Plotly 使用）。"""
-    global _cjk_font_family_cache
-    # 已计算过：None=未计算，''=无可用字体，非空=字体名
-    if _cjk_font_family_cache is not None:
-        return _cjk_font_family_cache if _cjk_font_family_cache else None
-    system = platform.system()
-    candidates: List[str] = list(_CJK_FONT_CANDIDATES.get(system, _CJK_FONT_CANDIDATES["Linux"]))
-    # Linux 下用 fc-list 发现系统已安装的中文语言字体，优先使用
-    if system == "Linux":
-        try:
-            out = subprocess.run(
-                ["fc-list", "-f", "%{family}\n", ":lang=zh"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if out.returncode == 0 and out.stdout:
-                for line in out.stdout.strip().splitlines():
-                    name = line.strip().split(",")[0].strip()  # 取第一个 family
-                    if name and name not in candidates:
-                        candidates.insert(0, name)
-        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-            pass
-    chosen: Optional[str] = None
-    for name in candidates:
-        if not name or name == "DejaVu Sans":
-            continue
-        try:
-            path = fm.findfont(fm.FontProperties(family=name), fallback_to_default=False)
-            if path and "DejaVu" not in path:
-                chosen = name
-                break
-        except Exception:
-            continue
-
-    # Linux：matplotlib 字体缓存可能未包含新安装的字体，用 fc-list 取路径后按文件加载
-    if not chosen and system == "Linux":
-        try:
-            out = subprocess.run(
-                ["fc-list", "-f", "%{file}\n", ":lang=zh"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if out.returncode == 0 and out.stdout:
-                paths = [p.strip() for p in out.stdout.strip().splitlines() if p.strip()]
-                font_manager = getattr(fm, "fontManager", None)
-                if font_manager is not None and hasattr(font_manager, "addfont"):
-                    for font_path in paths:
-                        if "wqy" in font_path.lower() or "noto" in font_path.lower() or "cjk" in font_path.lower():
-                            try:
-                                font_manager.addfont(font_path)
-                                for f in font_manager.ttflist:
-                                    if getattr(f, "fname", None) == font_path:
-                                        chosen = getattr(f, "name", None) or ""
-                                        if chosen:
-                                            break
-                                if chosen:
-                                    break
-                            except Exception:
-                                continue
-        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-            pass
-
-    if chosen:
-        _cjk_font_family_cache = chosen
-        return chosen
-    _cjk_font_family_cache = ""  # 标记已计算且无可用字体
-    if not getattr(_get_cjk_font_family, "_warned", False):
-        _get_cjk_font_family._warned = True
-        logger.warning(
-            "未检测到中文字体，趋势图中文可能显示为方框。"
-            "Linux 可安装: apt-get install fonts-wqy-microhei 或 fonts-noto-cjk；"
-            "若已安装仍报错可尝试: rm -rf ~/.cache/matplotlib 后重启进程"
-        )
-    return None
-
-
-def _setup_matplotlib_cjk_font() -> None:
-    """设置 matplotlib 使用支持中文的字体，避免 'Glyph missing from font' 警告与方框。"""
-    chosen = _get_cjk_font_family()
-    if chosen:
-        plt.rcParams["font.sans-serif"] = [chosen]
-    else:
-        system = platform.system()
-        candidates = _CJK_FONT_CANDIDATES.get(system, _CJK_FONT_CANDIDATES["Linux"])
-        plt.rcParams["font.sans-serif"] = candidates
-    plt.rcParams["axes.unicode_minus"] = False
-
-# 尝试导入 Plotly（可选，如果未安装则使用 matplotlib）
 try:
     import plotly.graph_objects as go
     import plotly.io as pio
-    PLOTLY_AVAILABLE = True
 except ImportError:
-    PLOTLY_AVAILABLE = False
-    logger.info("Plotly 未安装，将使用 matplotlib 生成图表。要使用更美观的图表，请安装: pip install plotly kaleido")
+    go = None
+    pio = None
 
 
 # 告警里仅用于路由/展示、通常不出现在 metric 里的标签，过滤曲线时不参与匹配
 _ALERT_ONLY_LABELS = {"alertname", "severity", "cluster", "_source", "_receiver"}
-
-# 图例标签白名单：仅在此列表中的 label 会显示在图例中，便于统一控制（可在 config 中覆盖）
-# 与 config 默认一致，含 nginx status、server_name 等，避免未加载 config 时图例缺项
-DEFAULT_LEGEND_LABEL_WHITELIST = (
-    "pod", "container", "device", "mountpoint", "fstype", "instance", "node",
-    "topic", "consumergroup", "name", "address",
-    "group", "broker", "brokerIP", "cluster", "env",
-    "service_name", "endpoint", "application",
-    "jenkins_job", "build_number",
-    "server_name", "status", "uri", "request_uri", "remote_addr", "url",
-    "namespace", "alertmanager", "remote_name", "controller", "resource",
-    "service", "kubernetes_namespace",
-)
 
 
 def _full_decode_expr(raw: str) -> str:
@@ -346,38 +223,6 @@ def _filter_result_by_alert_labels(
     return result
 
 
-def _legend_line_with_alert_value(label: str, ys: List[float]) -> str:
-    """图例仅展示当前告警值，避免过宽挤压绘图区。"""
-    if not ys:
-        return label
-    alert_value = ys[-1]
-    return f"{label}\n告警值 {alert_value:.1f}"
-
-
-def _build_series_label(
-    metric: Dict[str, str],
-    legend_label_whitelist: Optional[List[str]] = None,
-) -> str:
-    """
-    从 Prometheus metric 标签构造曲线名称。
-    仅显示白名单中的标签；白名单为空或未传时使用默认白名单（便于统一控制）。
-    """
-    if not metric:
-        return "series"
-    whitelist = legend_label_whitelist or list(DEFAULT_LEGEND_LABEL_WHITELIST)
-    allow = set(whitelist) if whitelist else set()
-    pairs = [f"{k}={metric[k]}" for k in sorted(metric.keys()) if k in allow and k != "__name__"]
-    if pairs:
-        label = ", ".join(pairs)
-    else:
-        # 白名单未命中时兜底：显示所有非 __name__ 的标签（避免漏掉 status 等）
-        fallback = [f"{k}={v}" for k, v in sorted(metric.items()) if k != "__name__"]
-        label = ", ".join(fallback) if fallback else metric.get("__name__", "series")
-    if len(label) > 90:
-        return label[:87] + "..."
-    return label
-
-
 def _generate_plot_with_plotly(
     result: list,
     alertname: Optional[str] = None,
@@ -412,54 +257,20 @@ def _generate_plot_with_plotly(
         
         plotted = 0
         legend_labels: List[str] = []
-        all_timestamps: List[datetime] = []  # 用于红线/阴影和 x 范围
-        for idx, series in enumerate(result):
-            values = series.get("values") or []
-            if not values:
-                continue
-            
-            xs = []
-            ys = []
-            for item in values:
-                if not isinstance(item, (list, tuple)) or len(item) < 2:
-                    continue
-                try:
-                    ts = float(item[0])
-                    val = float(item[1])
-                except (TypeError, ValueError):
-                    continue
-                # 将 UTC 时间转换为 UTC+8
-                utc_time = datetime.fromtimestamp(ts, tz=timezone.utc)
-                utc8_time = utc_time.astimezone(ZoneInfo("Asia/Shanghai"))
-                xs.append(utc8_time)
-                ys.append(val)
-            
-            if not xs:
-                continue
-            
-            # 确保数据点按时间排序
-            sorted_pairs = sorted(zip(xs, ys), key=lambda x: x[0])
-            xs, ys = zip(*sorted_pairs) if sorted_pairs else ([], [])
-            
-            if not xs:
-                continue
-            
-            label = _build_series_label(
-                series.get("metric") or {},
-                legend_label_whitelist=legend_label_whitelist,
-            )
-            legend_label = _legend_line_with_alert_value(label, list(ys))
+        all_timestamps: List[datetime] = []
+        whitelist = legend_label_whitelist or list(DEFAULT_LEGEND_LABEL_WHITELIST)
+
+        def hex_to_rgba(hex_color, alpha=0.2):
+            hex_color = hex_color.lstrip('#')
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            return f'rgba({r}, {g}, {b}, {alpha})'
+
+        for idx, (xs, ys, metric) in enumerate(parse_time_series_data(result)):
+            label = build_series_label(metric, legend_label_whitelist=whitelist)
+            legend_label = legend_line_with_alert_value(label, ys)
             color = colors[idx % len(colors)]
-            
-            # 将十六进制颜色转换为 rgba 格式（用于填充）
-            def hex_to_rgba(hex_color, alpha=0.2):
-                hex_color = hex_color.lstrip('#')
-                r = int(hex_color[0:2], 16)
-                g = int(hex_color[2:4], 16)
-                b = int(hex_color[4:6], 16)
-                return f'rgba({r}, {g}, {b}, {alpha})'
-            
-            # 添加填充区域（渐变效果），图例含均值/最大/最小
             fig.add_trace(go.Scatter(
                 x=list(xs),
                 y=list(ys),
@@ -468,7 +279,7 @@ def _generate_plot_with_plotly(
                 line=dict(
                     color=color,
                     width=3,
-                    shape='spline',  # 平滑曲线
+                    shape='spline',
                 ),
                 marker=dict(
                     size=6,
@@ -486,27 +297,11 @@ def _generate_plot_with_plotly(
         if plotted == 0:
             return None
         
-        # 设置标题与 Y 轴单位（借鉴参考图：使用率类注明 %）
         chart_title = alertname if alertname else "Prometheus Alert Trend"
         _an = (alertname or "").upper()
         yaxis_title = "使用率 (%)" if ("使用率" in (alertname or "")) or ("CPU" in _an) else ""
-        
-        # X轴标签
-        if alert_time:
-            try:
-                from dateutil import parser
-                alert_dt = parser.parse(alert_time)
-                if alert_dt.tzinfo is None:
-                    alert_dt = alert_dt.replace(tzinfo=timezone.utc)
-                alert_dt_utc8 = alert_dt.astimezone(ZoneInfo("Asia/Shanghai"))
-                xlabel_text = alert_dt_utc8.strftime('%Y-%m-%d %H:%M:%S')
-            except Exception:
-                xlabel_text = "Time (UTC+8)"
-        else:
-            xlabel_text = "Time (UTC+8)"
-        
-        # 使用检测到的中文字体，避免标题/图例中文显示为方框
-        plot_font_family = _get_cjk_font_family() or "Arial, sans-serif"
+        xlabel_text = format_alert_time(alert_time)
+        plot_font_family = get_cjk_font_family() or "Arial, sans-serif"
         
         # 图例：垂直排列在右侧，无边框，紧凑
         fig.update_layout(
@@ -591,160 +386,23 @@ def _generate_plot_with_matplotlib(
     alert_time: Optional[str] = None,
     legend_label_whitelist: Optional[List[str]] = None,
 ) -> Optional[bytes]:
-    """
-    使用 Matplotlib 从已解析的 result 生成趋势图（含红线、图例在右）。
-    供 generate_plot_from_generator_url 与 generate_plot_from_result 复用。
-    """
-    import numpy as np
-    from matplotlib.colors import LinearSegmentedColormap
-
-    fig, ax = plt.subplots(figsize=(14, 7), dpi=150)
-    plotted = 0
-    legend_labels: List[str] = []
-    time_axis_xs: List[datetime] = []
-    colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e']
-    if len(result) > len(colors):
-        colors = plt.cm.Set2(range(len(result)))
-
-    for idx, series in enumerate(result):
-        values = series.get("values") or []
-        if not values:
-            continue
-        xs = []
-        ys = []
-        for item in values:
-            if not isinstance(item, (list, tuple)) or len(item) < 2:
-                continue
-            try:
-                ts = float(item[0])
-                val = float(item[1])
-            except (TypeError, ValueError):
-                continue
-            utc_time = datetime.fromtimestamp(ts, tz=timezone.utc)
-            utc8_time = utc_time.astimezone(ZoneInfo("Asia/Shanghai"))
-            xs.append(utc8_time)
-            ys.append(val)
-        if not xs:
-            continue
-        sorted_pairs = sorted(zip(xs, ys), key=lambda x: x[0])
-        xs, ys = zip(*sorted_pairs) if sorted_pairs else ([], [])
-        if not xs:
-            continue
-        label = _build_series_label(
-            series.get("metric") or {},
-            legend_label_whitelist=legend_label_whitelist,
-        )
-        if not label or not label.strip():
-            label = series.get("metric", {}).get("__name__", f"series_{idx}")
-        legend_label = _legend_line_with_alert_value(label, list(ys))
-        legend_labels.append(legend_label)
-        color = colors[idx % len(colors)]
-        ax.plot(xs, ys, linewidth=3.0, label=legend_label, color=color, marker='o', markersize=4, alpha=0.95, zorder=5 - idx)
-        time_axis_xs = list(xs)
-        plotted += 1
-
-    if plotted == 0:
-        plt.close(fig)
-        return None
-
-    # 借鉴参考图：使用率类显示 Y 轴单位
-    _an = (alertname or "").upper()
-    show_pct = ("使用率" in (alertname or "")) or ("CPU" in _an)
-
-    chart_title = alertname if alertname else "Prometheus Alert Trend"
-    # 标题按整张图居中，而不是按左侧坐标轴区域居中
-    fig.suptitle(chart_title, fontsize=20, fontweight='bold', color='#ffffff', y=0.98, x=0.5, ha='center')
-
-    if alert_time:
-        try:
-            from dateutil import parser
-            alert_dt = parser.parse(alert_time)
-            if alert_dt.tzinfo is None:
-                alert_dt = alert_dt.replace(tzinfo=timezone.utc)
-            alert_dt_utc8 = alert_dt.astimezone(ZoneInfo("Asia/Shanghai"))
-            xlabel_text = alert_dt_utc8.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-            xlabel_text = "Time (UTC+8)"
-    else:
-        xlabel_text = "Time (UTC+8)"
-    ax.set_xlabel(xlabel_text, fontsize=14, color='#ffffff', fontweight='normal')
-    ax.set_ylabel("使用率 (%)" if show_pct else "", fontsize=12 if show_pct else 0, color='#ffffff')
-
-    def format_y_value(x, p):
-        if abs(x) >= 1000:
-            return f'{x/1000:.2f} K'.rstrip('0').rstrip('.')
-        elif x == int(x):
-            return f'{int(x)}'
-        return f'{x:.1f}'
-
-    if show_pct:
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1f}%'))
-    else:
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(format_y_value))
-    ax.tick_params(axis='y', labelsize=12, colors='#ffffff', width=1)
-    ax.tick_params(axis='x', labelsize=11, colors='#ffffff', width=1)
-    ax.grid(True, linestyle="--", alpha=0.4, linewidth=1.0, color='#ffffff')
-    ax.set_axisbelow(True)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#ffffff')
-    ax.spines['bottom'].set_color('#ffffff')
-    ax.spines['left'].set_linewidth(2)
-    ax.spines['bottom'].set_linewidth(2)
-
-    # 图例布局优化：垂直排列在右侧，无边框
-    legend_obj = None
-    if plotted > 0:
-        legend_obj = ax.legend(
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),  # 紧挨主图右侧，顶部对齐
-            fontsize=10,
-            frameon=False,  # 去掉图例边框
-            labelspacing=0.8,
-            handlelength=1.5,
-            handletextpad=0.5,
-        )
-        for text in legend_obj.get_texts():
-            text.set_color('#ffffff')
-            text.set_fontweight('normal')
-
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S', tz=ZoneInfo("Asia/Shanghai")))
-    if time_axis_xs:
-        time_span = (max(time_axis_xs) - min(time_axis_xs)).total_seconds()
-        if time_span <= 300:
-            ax.xaxis.set_major_locator(mdates.SecondLocator(interval=30))
-        elif time_span <= 900:
-            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=1))
-        elif time_span <= 3600:
-            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=5))
-        else:
-            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
-    fig.autofmt_xdate(rotation=45)
-
-    fig.patch.set_facecolor('#0a0a0f')
-    ax.set_facecolor('#151520')
-    y_min, y_max = ax.get_ylim()
-    x_min, x_max = ax.get_xlim()
-    y_vals = np.linspace(y_min, y_max, 100)
-    x_vals = np.linspace(x_min, x_max, 100)
-    Z = np.linspace(0, 1, len(y_vals)).reshape(-1, 1)
-    Z = np.tile(Z, (1, len(x_vals)))
-    cmap = LinearSegmentedColormap.from_list('custom', ['#0a0a0f', '#1a1a2e', '#2a2a3e'], N=256)
-    ax.imshow(Z, extent=[x_min, x_max, y_min, y_max], aspect='auto', cmap=cmap, alpha=0.3, zorder=0, origin='lower')
-
-    # 主图占 80% 宽度，右侧留给垂直图例
-    fig.subplots_adjust(left=0.08, right=0.80, top=0.90, bottom=0.15)
-    
-    # 确保图例不被裁剪
-    extra_artists = [legend_obj] if legend_obj else []
-    
-    buffer = BytesIO()
-    fig.savefig(
-        buffer, format='png', dpi=150, facecolor='#0a0a0f', edgecolor='none',
-        bbox_inches='tight', bbox_extra_artists=extra_artists,
+    """Matplotlib 出图，委托给 plotters.base.render_matplotlib_png。"""
+    warnings.filterwarnings(
+        "ignore",
+        message=".*Glyph.*missing from font",
+        category=UserWarning,
+        module="matplotlib",
     )
-    plt.close(fig)
-    return buffer.getvalue()
+    _an = (alertname or "").upper()
+    return render_matplotlib_png(
+        result,
+        alertname=alertname,
+        alert_time=alert_time,
+        legend_label_whitelist=legend_label_whitelist or list(DEFAULT_LEGEND_LABEL_WHITELIST),
+        default_title="Prometheus Alert Trend",
+        legend_with_alert_value=True,
+        percent_ylabel=("使用率" in (alertname or "")) or ("CPU" in _an),
+    )
 
 
 def generate_plot_from_result(
@@ -768,13 +426,6 @@ def generate_plot_from_result(
         )
         if png:
             return png
-    _setup_matplotlib_cjk_font()
-    warnings.filterwarnings(
-        "ignore",
-        message=".*Glyph.*missing from font",
-        category=UserWarning,
-        module="matplotlib",
-    )
     return _generate_plot_with_matplotlib(result, alertname, alert_time, legend_label_whitelist)
 
 
@@ -1040,14 +691,6 @@ def generate_plot_from_generator_url(
                 return plotly_result
             logger.info("Plotly 出图失败，回退到 matplotlib")
 
-        # 使用 Matplotlib 生成图表（备选方案）
-        _setup_matplotlib_cjk_font()
-        warnings.filterwarnings(
-            "ignore",
-            message=".*Glyph.*missing from font",
-            category=UserWarning,
-            module="matplotlib",
-        )
         png = _generate_plot_with_matplotlib(
             result, alertname, alert_time,
             legend_label_whitelist=legend_label_whitelist,

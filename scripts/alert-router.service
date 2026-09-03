@@ -12,6 +12,7 @@ Environment="HOST=0.0.0.0"
 Environment="PORT=8080"
 Environment="WORKERS=4"
 Environment="TIMEOUT=30"
+Environment="CONFIG_FILE=/opt/alert-router-py/config.yaml"
 
 # 启动命令（使用 Python 3.9）
 ExecStart=/usr/bin/python3.9 -m uvicorn app:app --host ${HOST} --port ${PORT} --workers ${WORKERS} --timeout-keep-alive ${TIMEOUT}

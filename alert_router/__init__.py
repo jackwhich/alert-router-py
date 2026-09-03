@@ -26,13 +26,6 @@ from .senders import send_telegram, send_webhook, send_tongsheng
 # 服务层（新增）
 from .services import AlertService, ImageService, ChannelFilter
 
-# 绘图器（新增）
-from .plotters import (
-    generate_plot_from_generator_url,
-    generate_plot_from_result,
-    generate_plot_from_grafana_generator_url,
-)
-
 __all__ = [
     # 核心模块
     "Channel",
@@ -56,8 +49,28 @@ __all__ = [
     "AlertService",
     "ImageService",
     "ChannelFilter",
-    # 绘图器
+    # 绘图器（延迟导入，避免未安装 matplotlib 时拖垮其它模块）
     "generate_plot_from_generator_url",
     "generate_plot_from_result",
     "generate_plot_from_grafana_generator_url",
 ]
+
+
+def __getattr__(name: str):
+    if name in {
+        "generate_plot_from_generator_url",
+        "generate_plot_from_result",
+        "generate_plot_from_grafana_generator_url",
+    }:
+        from .plotters import (
+            generate_plot_from_generator_url,
+            generate_plot_from_grafana_generator_url,
+            generate_plot_from_result,
+        )
+        mapping = {
+            "generate_plot_from_generator_url": generate_plot_from_generator_url,
+            "generate_plot_from_result": generate_plot_from_result,
+            "generate_plot_from_grafana_generator_url": generate_plot_from_grafana_generator_url,
+        }
+        return mapping[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

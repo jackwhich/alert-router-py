@@ -6,10 +6,9 @@
 import logging
 from typing import Dict, List, Optional
 
-from ..plotters.prometheus_plotter import generate_plot_from_generator_url
-from ..plotters.grafana_plotter import generate_plot_from_grafana_generator_url
 from ..core.models import Channel
 from ..core.metrics import ImageGenerateFailuresTotal, ImageGeneratedTotal
+from ..routing.ttl_dedup import is_resolved_status
 
 logger = logging.getLogger("alert-router")
 
@@ -116,7 +115,7 @@ class ImageService:
         # 根据告警状态选择时间：firing 用 startsAt，resolved 用 endsAt
         alert_time = (
             alert.get("endsAt")
-            if alert_status == "resolved"
+            if is_resolved_status(alert_status)
             else alert.get("startsAt")
         )
 
@@ -133,6 +132,7 @@ class ImageService:
             datasource_type = None
         inject_labels = image_cfg.get("inject_labels")
         try:
+            from ..plotters.prometheus_plotter import generate_plot_from_generator_url
             image_bytes = generate_plot_from_generator_url(
                 alert.get("generatorURL", ""),
                 prometheus_url=prometheus_url,
@@ -221,28 +221,45 @@ class ImageService:
         # 根据告警状态选择时间：firing 用 startsAt，resolved 用 endsAt
         alert_time = (
             alert.get("endsAt")
-            if alert_status == "resolved"
+            if is_resolved_status(alert_status)
             else alert.get("startsAt")
         )
 
-        image_bytes = generate_plot_from_grafana_generator_url(
-            alert.get("generatorURL", ""),
-            grafana_url=grafana_url,
-            grafana_api_token=grafana_api_token,
-            prometheus_url=prometheus_url,
-            proxies=plot_proxy,
-            lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
-            step=str(image_cfg.get("step", "30s")),
-            timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
-            max_series=int(image_cfg.get("max_series", 8)),
-            alertname=alertname,
-            alert_time=alert_time,
-        )
+        image_bytes = None
+        try:
+            from ..plotters.grafana_plotter import generate_plot_from_grafana_generator_url
+            image_bytes = generate_plot_from_grafana_generator_url(
+                alert.get("generatorURL", ""),
+                grafana_url=grafana_url,
+                grafana_api_token=grafana_api_token,
+                prometheus_url=prometheus_url,
+                proxies=plot_proxy,
+                lookback_minutes=int(image_cfg.get("lookback_minutes", 15)),
+                step=str(image_cfg.get("step", "30s")),
+                timeout_seconds=int(image_cfg.get("timeout_seconds", 8)),
+                max_series=int(image_cfg.get("max_series", 8)),
+                alertname=alertname,
+                alert_time=alert_time,
+            )
+        except Exception as exc:
+            logger.warning("Grafana 趋势图生成异常: %s", exc, exc_info=True)
+            try:
+                ImageGenerateFailuresTotal.labels(source="grafana", reason="export_error").inc()
+            except Exception:
+                pass
         
         if image_bytes:
             logger.info(f"告警 {alertname} 已生成趋势图，将优先按图片发送 Telegram")
+            try:
+                ImageGeneratedTotal.labels(source="grafana", status="ok").inc()
+            except Exception:
+                pass
         else:
             logger.info(f"告警 {alertname} 未生成趋势图，将按文本发送 Telegram")
+            try:
+                ImageGeneratedTotal.labels(source="grafana", status="fail").inc()
+            except Exception:
+                pass
         
         return image_bytes
     

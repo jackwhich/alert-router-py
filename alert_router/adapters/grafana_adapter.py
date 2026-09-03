@@ -33,28 +33,6 @@ def _parse_current_value(alert: Dict[str, Any]) -> str:
     return ""
 
 
-def detect(payload: Dict[str, Any]) -> bool:
-    """
-    检测是否为 Grafana Unified Alerting 格式
-    
-    识别特征：
-    - 包含 "alerts" 数组
-    - Grafana 特有：orgId、state、title（与 Prometheus Alertmanager 区分）
-    - Grafana 的 version 为 "1"，Prometheus Alertmanager 通常为 "4"
-    """
-    if "alerts" not in payload:
-        return False
-    # Grafana Unified Alerting 必有 orgId 或 version "1"
-    if "orgId" in payload:
-        return True
-    if payload.get("version") == "1" and "receiver" in payload:
-        return True
-    # 无 version 或 version 非 "4" 且像 Grafana（有 state/title）
-    if payload.get("version") != "4" and "state" in payload:
-        return True
-    return False
-
-
 def parse(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     解析并转换 Grafana Unified Alerting webhook payload 为标准格式

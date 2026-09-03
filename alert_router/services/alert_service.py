@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from requests.exceptions import HTTPError, RequestException, Timeout, ConnectionError as RequestsConnectionError
 
 from ..routing.grafana_dedup import should_skip_grafana_duplicate
+from ..routing.ttl_dedup import is_resolved_status
 from ..routing.jenkins_dedup import should_skip_jenkins_firing
 from ..routing.routing import route
 from ..senders.senders import send_telegram, send_webhook, send_tongsheng
@@ -292,7 +293,7 @@ class AlertService:
             return {"alert": alertname, "channel": channel_name, "skipped": "渠道已禁用"}
 
         # 检查是否发送 resolved 状态
-        if alert_status == "resolved" and not channel.send_resolved:
+        if is_resolved_status(alert_status) and not channel.send_resolved:
             logger.debug(
                 f"告警 {alertname} 跳过 resolved 状态（渠道 {channel_name} 配置为不发送 resolved）"
             )

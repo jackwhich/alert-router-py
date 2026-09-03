@@ -33,8 +33,8 @@ def _config_path() -> Path:
     env_path = os.environ.get("CONFIG_FILE")
     if env_path and os.path.isfile(env_path):
         return Path(env_path)
-    # 项目根：当前文件 alert_router/config.py -> 上级目录 alert-router-py
-    root = Path(__file__).resolve().parent.parent
+    # 项目根：alert_router/core/config.py -> 上三级为仓库根目录
+    root = Path(__file__).resolve().parent.parent.parent
     return root / "config.yaml"
 
 
@@ -87,7 +87,7 @@ def load_config() -> Tuple[Dict, Dict[str, Channel]]:
     # 尝试获取 logger，如果日志系统还未初始化则使用 print（配置加载阶段）
     try:
         logger = logging.getLogger("alert-router")
-    except:
+    except Exception:
         logger = None
     
     path = _config_path()
